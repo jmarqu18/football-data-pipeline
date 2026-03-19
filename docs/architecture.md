@@ -115,7 +115,7 @@ ingest_statsbomb → ingest_understat → ingest_fbref
 | Ingesta StatsBomb   | `statsbombpy`                       |
 | Ingesta Understat   | `soccerdata`                        |
 | Ingesta FBref       | `soccerdata`                        |
-| Lenguaje            | Python 3.11+                        |
+| Lenguaje            | Python 3.13+                        |
 
 ## Estructura de Directorios
 
