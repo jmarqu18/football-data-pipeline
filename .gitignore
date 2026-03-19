@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Agents
+.claude
+.agent
+
+# Environment
+.env
+
+# Lock files
+uv.lock
+
+# OS
+.DS_Store
+Thumbs.db
