@@ -1,0 +1,2 @@
+-- init.sql — Inicialización de la base de datos PostgreSQL (capa CLEAN)
+-- Se ejecuta automáticamente al levantar el contenedor de PostgreSQL.

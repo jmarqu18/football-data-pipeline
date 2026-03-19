@@ -1,0 +1,34 @@
+[project]
+name = "football-data-pipeline"
+version = "0.1.0"
+description = "Pipeline de datos multi-fuente para fútbol: StatsBomb + Understat + FBref"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "statsbombpy",
+    "soccerdata",
+    "pandas",
+    "pyarrow",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "datasette",
+    "apache-airflow",
+    "thefuzz[speedup]",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

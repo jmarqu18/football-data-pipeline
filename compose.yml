@@ -1,0 +1,2 @@
+# compose.yml — Stack: Airflow + PostgreSQL + Datasette
+# Compatible con: podman-compose up / docker-compose up
