@@ -1,0 +1,40 @@
+[
+  {
+    "player_id": 227,
+    "player_name": "Robert Lewandowski",
+    "team": "Barcelona",
+    "season": "2024/2025",
+    "games": 30,
+    "minutes": 2520,
+    "goals": 19,
+    "assists": 4,
+    "xg": 18.53,
+    "xa": 3.12,
+    "npxg": 16.08,
+    "xg_chain": 22.35,
+    "xg_buildup": 8.72,
+    "shots": 98,
+    "key_passes": 25,
+    "yellow_cards": 3,
+    "red_cards": 0
+  },
+  {
+    "player_id": 9998,
+    "player_name": "Bench Player",
+    "team": "Leganes",
+    "season": "2024/2025",
+    "games": 2,
+    "minutes": 45,
+    "goals": 0,
+    "assists": 0,
+    "xg": 0.0,
+    "xa": 0.0,
+    "npxg": 0.0,
+    "xg_chain": 0.0,
+    "xg_buildup": 0.0,
+    "shots": 0,
+    "key_passes": 0,
+    "yellow_cards": 0,
+    "red_cards": 0
+  }
+]

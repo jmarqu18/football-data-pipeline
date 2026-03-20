@@ -1,15 +1,21 @@
-"""Modelos Pydantic para validación en cada capa del pipeline."""
+"""Pydantic models for validation at each pipeline layer."""
 
 from pipeline.models.raw import (
+    RawAPIFootballInjury,
+    RawAPIFootballPlayer,
+    RawAPIFootballPlayerStats,
+    RawAPIFootballTransfer,
     RawFBrefPlayerSeason,
-    RawStatsBombEvent,
-    RawStatsBombMatch,
+    RawUnderstatPlayerSeason,
     RawUnderstatShot,
 )
 
 __all__ = [
+    "RawAPIFootballInjury",
+    "RawAPIFootballPlayer",
+    "RawAPIFootballPlayerStats",
+    "RawAPIFootballTransfer",
     "RawFBrefPlayerSeason",
-    "RawStatsBombEvent",
-    "RawStatsBombMatch",
+    "RawUnderstatPlayerSeason",
     "RawUnderstatShot",
 ]

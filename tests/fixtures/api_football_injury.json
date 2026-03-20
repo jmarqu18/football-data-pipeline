@@ -1,0 +1,24 @@
+[
+  {
+    "player_id": 1100,
+    "player_name": "Pedro González López",
+    "team_id": 529,
+    "team_name": "Barcelona",
+    "fixture_id": 1035042,
+    "league_id": 140,
+    "reason": "Knee Injury",
+    "type": "Missing Fixture",
+    "date": "2025-01-15"
+  },
+  {
+    "player_id": 47380,
+    "player_name": "Gavi",
+    "team_id": 529,
+    "team_name": "Barcelona",
+    "fixture_id": null,
+    "league_id": 140,
+    "reason": "ACL Injury",
+    "type": "Missing Fixture",
+    "date": "2024-11-22"
+  }
+]
