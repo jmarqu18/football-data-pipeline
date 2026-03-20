@@ -14,6 +14,3 @@ sources:
   understat:
     league: "La Liga"
     season: "2025/2026"
-  fbref:
-    league: "La Liga"
-    season: "2025-2026"

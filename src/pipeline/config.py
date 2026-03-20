@@ -23,8 +23,7 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -106,34 +105,18 @@ class UnderstatConfig(BaseModel):
     season: str
 
 
-class FBrefConfig(BaseModel):
-    """Configuration for the FBref data source (scraped via soccerdata).
-
-    Args:
-        league: Human-readable league name as expected by soccerdata.
-        season: Season string in FBref format (e.g. ``"2024-2025"``).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    league: str
-    season: str
-
-
 class SourcesConfig(BaseModel):
     """Container for all per-source configuration blocks.
 
     Args:
         api_football: API-Football source settings.
         understat: Understat source settings.
-        fbref: FBref source settings.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_football: ApiFootballConfig
     understat: UnderstatConfig
-    fbref: FBrefConfig
 
 
 class IngestionConfig(BaseModel):

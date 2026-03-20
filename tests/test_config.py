@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from pipeline.config import (
     ApiFootballConfig,
     ConfigurationError,
-    FBrefConfig,
     IngestionConfig,
     RateLimitConfig,
     SourcesConfig,
@@ -27,7 +26,6 @@ from pipeline.config import (
     get_config,
     load_config,
 )
-
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -46,12 +44,9 @@ _VALID_API_FOOTBALL = dict(
 
 _VALID_UNDERSTAT = dict(league="La Liga", season="2024/2025")
 
-_VALID_FBREF = dict(league="La Liga", season="2024-2025")
-
 _VALID_SOURCES = dict(
     api_football=_VALID_API_FOOTBALL,
     understat=_VALID_UNDERSTAT,
-    fbref=_VALID_FBREF,
 )
 
 _VALID_CONFIG_DICT = dict(sources=_VALID_SOURCES)
@@ -73,9 +68,6 @@ sources:
   understat:
     league: "La Liga"
     season: "2024/2025"
-  fbref:
-    league: "La Liga"
-    season: "2024-2025"
 """
 
 
@@ -237,42 +229,6 @@ class TestUnderstatConfig:
 
 
 # ─────────────────────────────────────────────────────────────
-# FBrefConfig
-# ─────────────────────────────────────────────────────────────
-
-
-class TestFBrefConfig:
-    """Tests for FBrefConfig validation."""
-
-    def test_valid_construction(self):
-        """A valid FBref config is created correctly."""
-        cfg = FBrefConfig(league="La Liga", season="2024-2025")
-        assert cfg.league == "La Liga"
-        assert cfg.season == "2024-2025"
-
-    def test_rejects_missing_league(self):
-        """league is required."""
-        with pytest.raises(ValidationError):
-            FBrefConfig(season="2024-2025")  # type: ignore[call-arg]
-
-    def test_rejects_missing_season(self):
-        """season is required."""
-        with pytest.raises(ValidationError):
-            FBrefConfig(league="La Liga")  # type: ignore[call-arg]
-
-    def test_rejects_extra_fields(self):
-        """Extra fields are forbidden."""
-        with pytest.raises(ValidationError):
-            FBrefConfig(league="La Liga", season="2024-2025", unknown="x")
-
-    def test_is_frozen(self):
-        """Model is immutable after construction."""
-        cfg = FBrefConfig(league="La Liga", season="2024-2025")
-        with pytest.raises(ValidationError):
-            cfg.season = "2025-2026"  # type: ignore[misc]
-
-
-# ─────────────────────────────────────────────────────────────
 # SourcesConfig
 # ─────────────────────────────────────────────────────────────
 
@@ -281,11 +237,10 @@ class TestSourcesConfig:
     """Tests for SourcesConfig validation."""
 
     def test_valid_construction(self):
-        """All three source configs are required and accepted."""
+        """Both source configs are required and accepted."""
         cfg = SourcesConfig(**_VALID_SOURCES)
         assert cfg.api_football.league_id == 140
         assert cfg.understat.league == "La Liga"
-        assert cfg.fbref.league == "La Liga"
 
     def test_rejects_extra_source_keys(self):
         """Unknown source keys (e.g. a new data source) are rejected."""
@@ -317,7 +272,6 @@ class TestIngestionConfig:
             "transfers",
         )
         assert cfg.sources.understat.season == "2024/2025"
-        assert cfg.sources.fbref.season == "2024-2025"
 
     def test_json_roundtrip(self):
         """Serialise to JSON and back; all values are preserved."""
@@ -362,7 +316,6 @@ class TestLoadConfig:
         assert cfg.sources.api_football.season == 2024
         assert cfg.sources.api_football.cache_ttl_hours == 168
         assert cfg.sources.understat.season == "2024/2025"
-        assert cfg.sources.fbref.season == "2024-2025"
 
     def test_raises_on_invalid_season(self, tmp_path: Path):
         """load_config raises ConfigurationError when a field fails validation."""

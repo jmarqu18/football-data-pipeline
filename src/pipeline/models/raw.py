@@ -274,33 +274,3 @@ class RawUnderstatPlayerSeason(BaseModel):
     red_cards: int = Field(ge=0)
 
 
-# ─────────────────────────────────────────────────────────────
-# FBref
-# ─────────────────────────────────────────────────────────────
-
-
-class RawFBrefPlayerSeason(BaseModel):
-    """Player season statistics from FBref.
-
-    Standard summary including appearances, minutes, goals, assists
-    and cards.  ``competition`` and ``season`` uniquely identify the
-    context of the record; without them, data from different seasons
-    would be indistinguishable in the pipeline.  Some fields can be
-    ``None`` when FBref lacks the data (e.g. nationality, birth year).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    player: str
-    competition: str
-    season: str
-    nation: str | None = None
-    pos: str
-    squad: str
-    born: int | None = None
-    matches_played: int = Field(ge=0)
-    minutes: int = Field(ge=0)
-    goals: int = Field(ge=0)
-    assists: int = Field(ge=0)
-    cards_yellow: int = Field(ge=0)
-    cards_red: int = Field(ge=0)

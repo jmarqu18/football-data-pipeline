@@ -5,7 +5,6 @@ from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
     RawAPIFootballTransfer,
-    RawFBrefPlayerSeason,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
 )
@@ -15,7 +14,6 @@ __all__ = [
     "RawAPIFootballPlayer",
     "RawAPIFootballPlayerStats",
     "RawAPIFootballTransfer",
-    "RawFBrefPlayerSeason",
     "RawUnderstatPlayerSeason",
     "RawUnderstatShot",
 ]
