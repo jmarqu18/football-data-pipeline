@@ -15,9 +15,14 @@ __pycache__/
 # Environment
 .env
 
-# Lock files
-uv.lock
-
 # OS
 .DS_Store
 Thumbs.db
+
+# Cache
+.cache/
+.pytest_cache/
+.ruff_cache/
+
+# Logs
+logs/

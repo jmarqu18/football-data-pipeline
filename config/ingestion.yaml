@@ -1,0 +1,19 @@
+sources:
+  api_football:
+    league_id: 140        # La Liga
+    season: 2025
+    endpoints:
+      - players_stats
+      - injuries
+      - transfers
+    cache_dir: data/cache/api_football
+    cache_ttl_hours: 168  # 7 days
+    rate_limit:
+      max_calls_per_day: 100
+      delay_between_calls: 1.0  # seconds
+  understat:
+    league: "La Liga"
+    season: "2025/2026"
+  fbref:
+    league: "La Liga"
+    season: "2025-2026"

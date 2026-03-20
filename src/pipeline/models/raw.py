@@ -13,8 +13,7 @@ Referencia JSON Schema: https://docs.pydantic.dev/latest/concepts/json_schema/
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, ConfigDict, Field
 
 # ─────────────────────────────────────────────────────────────
 # StatsBomb
@@ -26,13 +25,22 @@ class RawStatsBombEvent(BaseModel):
 
     Representa una acción individual dentro de un partido
     (pase, tiro, presión, etc.).  Los datos llegan vía `statsbombpy`.
+
+    ``period`` distingue tiempo regular (1-2), prórroga (3-4) y
+    penaltis (5).  ``player_id`` se incluye por trazabilidad: en
+    entity resolution no se utiliza directamente porque los IDs de
+    StatsBomb no comparten espacio con Understat ni FBref.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     type: str
     player: str | None = None
+    player_id: int | None = None
     team: str
     location: list[float] | None = None
+    period: int = Field(ge=1, le=5)
     minute: int = Field(ge=0)
     second: int = Field(ge=0, le=59)
 
@@ -43,6 +51,8 @@ class RawStatsBombMatch(BaseModel):
     Contiene la información básica de un partido incluyendo
     equipos, resultado, competición y temporada.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     match_id: int
     home_team: str
@@ -62,9 +72,11 @@ class RawUnderstatShot(BaseModel):
     """Tiro crudo de Understat.
 
     Las coordenadas (x, y) están normalizadas entre 0 y 1
-    tal como las proporciona Understat.  El campo `xg` es la
+    tal como las proporciona Understat.  El campo ``xg`` es la
     probabilidad de gol esperado para ese tiro.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: int
     minute: int = Field(ge=0)
@@ -86,12 +98,18 @@ class RawFBrefPlayerSeason(BaseModel):
     """Estadísticas de jugador por temporada de FBref.
 
     Resumen estándar que incluye apariciones, minutos, goles,
-    asistencias y tarjetas.  Algunos campos pueden ser ``None``
-    cuando FBref no dispone del dato (ej. nacionalidad, año de
-    nacimiento).
+    asistencias y tarjetas.  ``competition`` y ``season`` identifican
+    unívocamente el contexto del registro; sin ellos, datos de
+    diferentes temporadas serían indistinguibles en el pipeline.
+    Algunos campos pueden ser ``None`` cuando FBref no dispone del
+    dato (ej. nacionalidad, año de nacimiento).
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     player: str
+    competition: str
+    season: str
     nation: str | None = None
     pos: str
     squad: str
