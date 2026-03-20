@@ -1,0 +1,64 @@
+{
+  "get": "transfers",
+  "parameters": {
+    "team": "529"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "player": {
+        "id": 276,
+        "name": "Neymar"
+      },
+      "update": "2020-10-04T04:26:56+00:00",
+      "transfers": [
+        {
+          "date": "2017-08-03",
+          "type": "\u20ac 222M",
+          "teams": {
+            "in": {
+              "id": 85,
+              "name": "Paris Saint Germain",
+              "logo": "https://media.api-sports.io/football/teams/85.png"
+            },
+            "out": {
+              "id": 529,
+              "name": "Barcelona",
+              "logo": "https://media.api-sports.io/football/teams/529.png"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": 48500,
+        "name": "Lamine Yamal"
+      },
+      "update": "2023-08-01T10:00:00+00:00",
+      "transfers": [
+        {
+          "date": "2023-07-01",
+          "type": "N/A",
+          "teams": {
+            "in": {
+              "id": 529,
+              "name": "Barcelona",
+              "logo": "https://media.api-sports.io/football/teams/529.png"
+            },
+            "out": {
+              "id": null,
+              "name": null,
+              "logo": null
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
