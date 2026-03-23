@@ -1,0 +1,71 @@
+{
+  "get": "injuries",
+  "parameters": {
+    "league": "140",
+    "season": "2024"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "player": {
+        "id": 1100,
+        "name": "Pedri",
+        "photo": "https://media.api-sports.io/football/players/1100.png",
+        "type": "Muscle Injury",
+        "reason": "Muscle Injury"
+      },
+      "team": {
+        "id": 529,
+        "name": "Barcelona",
+        "logo": "https://media.api-sports.io/football/teams/529.png"
+      },
+      "fixture": {
+        "id": 12345,
+        "timezone": "UTC",
+        "date": "2024-10-15T20:00:00+00:00",
+        "timestamp": 1729022400
+      },
+      "league": {
+        "id": 140,
+        "season": 2024,
+        "name": "La Liga",
+        "country": "Spain",
+        "logo": null,
+        "flag": null
+      }
+    },
+    {
+      "player": {
+        "id": 47380,
+        "name": "Gavi",
+        "photo": "https://media.api-sports.io/football/players/47380.png",
+        "type": "ACL",
+        "reason": "Knee Injury"
+      },
+      "team": {
+        "id": 529,
+        "name": "Barcelona",
+        "logo": "https://media.api-sports.io/football/teams/529.png"
+      },
+      "fixture": {
+        "id": null,
+        "timezone": null,
+        "date": null,
+        "timestamp": null
+      },
+      "league": {
+        "id": 140,
+        "season": 2024,
+        "name": "La Liga",
+        "country": "Spain",
+        "logo": null,
+        "flag": null
+      }
+    }
+  ]
+}

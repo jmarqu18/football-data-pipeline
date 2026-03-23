@@ -1,7 +1,7 @@
 [project]
 name = "football-data-pipeline"
 version = "0.1.0"
-description = "Pipeline de datos multi-fuente para fútbol: API-Football + Understat + FBref"
+description = "Pipeline de datos multi-fuente para fútbol: API-Football + Understat"
 license = { file = "LICENSE" }
 authors = [
     { name = "Juanje Marquez", email = "juanje.mn@gmail.com" }
@@ -43,3 +43,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
+]

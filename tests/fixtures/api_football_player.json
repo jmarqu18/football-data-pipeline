@@ -1,0 +1,156 @@
+[
+  {
+    "player": {
+      "player_id": 1100,
+      "name": "Pedro González López",
+      "firstname": "Pedro",
+      "lastname": "González López",
+      "age": 22,
+      "birth_date": "2002-11-25",
+      "nationality": "Spain",
+      "height": "174 cm",
+      "weight": "60 kg",
+      "photo_url": "https://media.api-sports.io/football/players/1100.png"
+    },
+    "statistics": [
+      {
+        "player_id": 1100,
+        "team_id": 529,
+        "team_name": "Barcelona",
+        "league_id": 140,
+        "season": 2024,
+        "games": {
+          "appearances": 28,
+          "lineups": 25,
+          "minutes": 2100,
+          "number": 8,
+          "position": "Midfielder",
+          "rating": "7.342857",
+          "captain": false
+        },
+        "shots": {
+          "total": 32,
+          "on": 14
+        },
+        "goals": {
+          "total": 5,
+          "conceded": 0,
+          "assists": 7,
+          "saves": null
+        },
+        "passes": {
+          "total": 1850,
+          "key": 42,
+          "accuracy": 89
+        },
+        "tackles": {
+          "total": 35,
+          "blocks": 3,
+          "interceptions": 22
+        },
+        "duels": {
+          "total": 195,
+          "won": 105
+        },
+        "dribbles": {
+          "attempts": 55,
+          "success": 38,
+          "past": null
+        },
+        "fouls": {
+          "drawn": 30,
+          "committed": 15
+        },
+        "cards": {
+          "yellow": 4,
+          "yellowred": 0,
+          "red": 0
+        },
+        "penalty": {
+          "won": null,
+          "committed": null,
+          "scored": 0,
+          "missed": 0,
+          "saved": null
+        }
+      }
+    ]
+  },
+  {
+    "player": {
+      "player_id": 99999,
+      "name": "Unknown Youngster",
+      "firstname": null,
+      "lastname": null,
+      "age": null,
+      "birth_date": null,
+      "nationality": null,
+      "height": null,
+      "weight": null,
+      "photo_url": null
+    },
+    "statistics": [
+      {
+        "player_id": 99999,
+        "team_id": 529,
+        "team_name": "Barcelona",
+        "league_id": 140,
+        "season": 2024,
+        "games": {
+          "appearances": 1,
+          "lineups": 0,
+          "minutes": 12,
+          "number": null,
+          "position": "Attacker",
+          "rating": null,
+          "captain": false
+        },
+        "shots": {
+          "total": null,
+          "on": null
+        },
+        "goals": {
+          "total": null,
+          "conceded": null,
+          "assists": null,
+          "saves": null
+        },
+        "passes": {
+          "total": 5,
+          "key": null,
+          "accuracy": null
+        },
+        "tackles": {
+          "total": null,
+          "blocks": null,
+          "interceptions": null
+        },
+        "duels": {
+          "total": null,
+          "won": null
+        },
+        "dribbles": {
+          "attempts": null,
+          "success": null,
+          "past": null
+        },
+        "fouls": {
+          "drawn": null,
+          "committed": null
+        },
+        "cards": {
+          "yellow": 0,
+          "yellowred": 0,
+          "red": 0
+        },
+        "penalty": {
+          "won": null,
+          "committed": null,
+          "scored": null,
+          "missed": null,
+          "saved": null
+        }
+      }
+    ]
+  }
+]

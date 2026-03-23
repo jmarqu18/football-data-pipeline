@@ -1,0 +1,22 @@
+[
+  {
+    "player_id": 276,
+    "player_name": "Neymar",
+    "date": "2017-08-03",
+    "team_in_id": 85,
+    "team_in_name": "Paris Saint Germain",
+    "team_out_id": 529,
+    "team_out_name": "Barcelona",
+    "type": "€ 222M"
+  },
+  {
+    "player_id": 48500,
+    "player_name": "Lamine Yamal",
+    "date": "2023-07-01",
+    "team_in_id": 529,
+    "team_in_name": "Barcelona",
+    "team_out_id": null,
+    "team_out_name": null,
+    "type": "N/A"
+  }
+]
