@@ -641,6 +641,7 @@ class TestRawUnderstatShot:
             player="Mohamed Salah",
             player_id=1250,
             situation="OpenPlay",
+            body_part="Right Foot",
         )
         assert shot.id == 452109
         assert shot.minute == 23
@@ -651,6 +652,22 @@ class TestRawUnderstatShot:
         assert shot.player == "Mohamed Salah"
         assert shot.player_id == 1250
         assert shot.situation == "OpenPlay"
+        assert shot.body_part == "Right Foot"
+
+    def test_valid_shot_body_part_optional(self):
+        """body_part es opcional; por defecto es None."""
+        shot = RawUnderstatShot(
+            id=1,
+            minute=10,
+            result="SavedShot",
+            x=0.5,
+            y=0.5,
+            xg=0.15,
+            player="Test Player",
+            player_id=99,
+            situation="OpenPlay",
+        )
+        assert shot.body_part is None
 
     def test_shot_coordinate_bounds_valid(self):
         """Coordenadas x,y deben estar entre 0 y 1 (normalizadas Understat)."""

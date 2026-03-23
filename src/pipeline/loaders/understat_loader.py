@@ -64,6 +64,7 @@ class UnderstatLoader:
             "player": row["player"],
             "player_id": row["player_id"],
             "situation": row["situation"],
+            "body_part": row.get("body_part"),
         }
 
     @staticmethod

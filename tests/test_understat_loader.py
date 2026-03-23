@@ -77,6 +77,7 @@ class TestShotExtraction:
         assert extracted["minute"] == 23
         assert extracted["result"] == "Goal"
         assert extracted["situation"] == "OpenPlay"
+        assert extracted["body_part"] == "Right Foot"
 
     def test_extract_shot_validates_as_model(self):
         """Extracted dict passes Pydantic validation."""
@@ -93,10 +94,20 @@ class TestShotExtraction:
         extracted = UnderstatLoader._extract_shot(row)
 
         extra_keys = {"league", "season", "game", "team", "date",
-                      "body_part", "assist_player", "assist_player_id",
+                      "assist_player", "assist_player_id",
                       "league_id", "season_id", "game_id", "team_id",
                       "shot_id", "location_x", "location_y"}
         assert not extra_keys & set(extracted.keys())
+
+    def test_extract_shot_body_part_is_none_when_missing(self):
+        """body_part defaults to None when the column is absent."""
+        row = _load_fixture("understat_shots_dataframe.json")[0].copy()
+        row.pop("body_part", None)
+        extracted = UnderstatLoader._extract_shot(row)
+
+        assert extracted["body_part"] is None
+        shot = RawUnderstatShot.model_validate(extracted)
+        assert shot.body_part is None
 
 
 # ─────────────────────────────────────────────────────────────
