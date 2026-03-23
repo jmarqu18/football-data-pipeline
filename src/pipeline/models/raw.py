@@ -242,6 +242,7 @@ class RawUnderstatShot(BaseModel):
     player: str
     player_id: int
     situation: str
+    body_part: str | None = None
 
 
 class RawUnderstatPlayerSeason(BaseModel):
