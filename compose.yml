@@ -1,2 +1,117 @@
-# compose.yml — Stack: Airflow + PostgreSQL + Datasette
-# Compatible con: podman-compose up / docker-compose up
+# compose.yml — Stack de desarrollo: Airflow + PostgreSQL + Datasette
+# Compatible con: podman-compose up -d / docker compose up -d
+
+# ── Variables compartidas entre los servicios Airflow ─────────────────────────
+x-airflow-common:
+  &airflow-common
+  build: .
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-dev-secret-key-change-in-prod}
+    API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
+    DATABASE_URL: postgresql+psycopg2://airflow:airflow@postgres:5432/football
+  volumes:
+    - ./data:/opt/airflow/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+# ── Servicios ─────────────────────────────────────────────────────────────────
+services:
+
+  # 1. PostgreSQL 18 ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./sql/init.sql:/opt/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # 2. Inicialización de Airflow (one-shot) ──────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
+    restart: "no"
+
+  # 3. Airflow Webserver (:8080) ─────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    command: airflow webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # 4. Airflow Scheduler ─────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    command: airflow scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # 5. Datasette (:8001) ─────────────────────────────────────────────────────
+  datasette:
+    build: .
+    command:
+      - datasette
+      - serve
+      - /opt/airflow/data/enriched/enriched.db
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8001"
+      - --metadata
+      - /opt/airflow/datasette/metadata.yml
+      - --create
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/opt/airflow/data
+    restart: unless-stopped
+
+# ── Volúmenes ─────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
