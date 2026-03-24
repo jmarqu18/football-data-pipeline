@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import Engine, text
 
+from pipeline.db import get_engine
+
 logger = logging.getLogger(__name__)
 
 _MIN_MINUTES = 450
@@ -379,7 +381,6 @@ def run_feature_engineering(
         Dict with stats: players_total, players_with_xg, players_written.
     """
     from pipeline.models.features import PlayerSeasonFeatures
-    from pipeline.transform_clean import get_engine
 
     if engine is None:
         engine = get_engine()

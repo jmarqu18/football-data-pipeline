@@ -19,8 +19,8 @@ from pipeline.feature_engineering import run_feature_engineering
 
 logger = logging.getLogger(__name__)
 
-_FEATURES_DIR = Path(__file__).parent.parent / "data" / "features"
-_RAW_DIR = Path(__file__).parent.parent / "data" / "raw"
+_FEATURES_DIR = Path(__file__).parents[1] / "data" / "features"
+_RAW_DIR = Path(__file__).parents[1] / "data" / "raw"
 
 
 @dag(

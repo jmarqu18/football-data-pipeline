@@ -9,7 +9,6 @@ Idempotent: truncates all tables before re-inserting on every run.
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from datetime import date
@@ -18,9 +17,10 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from pipeline.db import get_engine
 from pipeline.entity_resolution import (
     resolve_players,
     resolve_teams,
@@ -38,7 +38,6 @@ from pipeline.models.raw import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DATABASE_URL = "postgresql://localhost:5432/football"
 _DEFAULT_REPORT_PATH = "data/reports/unresolved_candidates.csv"
 
 # ─────────────────────────────────────────────────────────────
@@ -161,16 +160,6 @@ def parse_transfer_type(value: str | None) -> tuple[str | None, str | None]:
 # ─────────────────────────────────────────────────────────────
 # PostgreSQL helpers
 # ─────────────────────────────────────────────────────────────
-
-
-def get_engine(database_url: str | None = None) -> Engine:
-    """Create a SQLAlchemy engine from a database URL.
-
-    Falls back to the ``DATABASE_URL`` environment variable, then to a
-    local default.
-    """
-    url = database_url or os.environ.get("DATABASE_URL", _DEFAULT_DATABASE_URL)
-    return create_engine(url)
 
 
 def _truncate_all(engine: Engine) -> None:
