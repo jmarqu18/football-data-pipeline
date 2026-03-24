@@ -38,7 +38,7 @@ def build_features_dag() -> None:
         """Compute all features from CLEAN PostgreSQL tables."""
         config = get_config()
         season_year = config.sources.api_football.season
-        season = f"{season_year - 1}/{season_year}"
+        season = f"{season_year}/{season_year + 1}"
         output_path = _FEATURES_DIR / "player_season_features.parquet"
 
         return run_feature_engineering(

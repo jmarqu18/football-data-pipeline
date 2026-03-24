@@ -213,7 +213,7 @@ def compute_scouting_features(
             last_injury_date=("injury_date", "max"),
         ).reset_index()
         ref_ts = pd.Timestamp(reference_date)
-        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days
+        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(object)
         inj_agg = inj_agg.drop(columns=["last_injury_date"])
     else:
         inj_agg = pd.DataFrame(columns=["player_id", "injury_count", "days_since_last_injury"])
