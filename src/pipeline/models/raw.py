@@ -198,6 +198,27 @@ class RawAPIFootballInjury(BaseModel):
     date: str
 
 
+class RawAPIFootballStandings(BaseModel):
+    """One team's standing in a league from the API-Football ``/standings`` endpoint."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    league_id: int = Field(ge=1)
+    season: int = Field(ge=2000)
+    team_id: int = Field(ge=1)
+    team_name: str
+    rank: int = Field(ge=1)
+    points: int = Field(ge=0)
+    played_total: int = Field(ge=0)
+    wins: int = Field(ge=0)
+    draws: int = Field(ge=0)
+    losses: int = Field(ge=0)
+    goals_for: int = Field(ge=0)
+    goals_against: int = Field(ge=0)
+    goal_diff: int
+    form: str | None = None  # e.g. "WWDLW" — may be None early in season
+
+
 class RawAPIFootballTransfer(BaseModel):
     """Transfer record from the API-Football ``/transfers`` endpoint.
 

@@ -16,6 +16,7 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballStandings,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
@@ -800,3 +801,84 @@ class TestRawUnderstatShot:
         assert "xg" in schema["properties"]
 
 
+# ─────────────────────────────────────────────────────────────
+# RawAPIFootballStandings
+# ─────────────────────────────────────────────────────────────
+
+
+class TestRawAPIFootballStandings:
+    """Tests for league standings records from API-Football."""
+
+    def test_raw_standings_model(self):
+        """A fully specified standings record is created correctly."""
+        s = RawAPIFootballStandings(
+            league_id=140, season=2024,
+            team_id=529, team_name="Barcelona",
+            rank=1, points=68,
+            played_total=28, wins=21, draws=5, losses=2,
+            goals_for=72, goals_against=31, goal_diff=41,
+            form="WWWDW",
+        )
+        assert s.played_total == 28
+        assert s.goal_diff == 41
+
+    def test_standings_form_is_optional(self):
+        """form can be None early in the season."""
+        s = RawAPIFootballStandings(
+            league_id=140, season=2024,
+            team_id=529, team_name="Barcelona",
+            rank=1, points=0,
+            played_total=0, wins=0, draws=0, losses=0,
+            goals_for=0, goals_against=0, goal_diff=0,
+            form=None,
+        )
+        assert s.form is None
+
+    def test_standings_goal_diff_can_be_negative(self):
+        """goal_diff can be negative (bottom of the table)."""
+        s = RawAPIFootballStandings(
+            league_id=140, season=2024,
+            team_id=999, team_name="Relegated FC",
+            rank=20, points=10,
+            played_total=28, wins=2, draws=4, losses=22,
+            goals_for=15, goals_against=65, goal_diff=-50,
+            form="LLLLL",
+        )
+        assert s.goal_diff == -50
+
+    def test_standings_rejects_extra_fields(self):
+        """Extra fields are forbidden."""
+        with pytest.raises(ValidationError):
+            RawAPIFootballStandings(
+                league_id=140, season=2024,
+                team_id=529, team_name="Barcelona",
+                rank=1, points=68,
+                played_total=28, wins=21, draws=5, losses=2,
+                goals_for=72, goals_against=31, goal_diff=41,
+                unknown="x",
+            )
+
+    def test_standings_is_frozen(self):
+        """Model is immutable after construction."""
+        s = RawAPIFootballStandings(
+            league_id=140, season=2024,
+            team_id=529, team_name="Barcelona",
+            rank=1, points=68,
+            played_total=28, wins=21, draws=5, losses=2,
+            goals_for=72, goals_against=31, goal_diff=41,
+        )
+        with pytest.raises(ValidationError):
+            s.points = 99  # type: ignore[misc]
+
+    def test_standings_json_roundtrip(self):
+        """JSON serialisation round-trip preserves all values."""
+        s = RawAPIFootballStandings(
+            league_id=140, season=2024,
+            team_id=529, team_name="Barcelona",
+            rank=1, points=68,
+            played_total=28, wins=21, draws=5, losses=2,
+            goals_for=72, goals_against=31, goal_diff=41,
+            form="WWWDW",
+        )
+        restored = RawAPIFootballStandings.model_validate_json(s.model_dump_json())
+        assert restored == s

@@ -33,6 +33,7 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballStandings,
     RawAPIFootballTransfer,
 )
 
@@ -538,6 +539,71 @@ class APIFootballLoader:
             self._cache_hits,
         )
         return transfers
+
+    def ingest_standings(self, *, force_refresh: bool = False) -> list[RawAPIFootballStandings]:
+        """Fetch standings for the configured league and season from ``/standings``.
+
+        One API call. Returns one RawAPIFootballStandings per team in the league.
+
+        Returns:
+            List of RawAPIFootballStandings, one per team.
+        """
+        params = {
+            "league": self._config.league_id,
+            "season": self._config.season,
+        }
+        raw = self._make_request("standings", params=params, force_refresh=force_refresh)
+
+        results: list[RawAPIFootballStandings] = []
+        rejected = 0
+        for league_block in raw.get("response", []):
+            league_info = league_block.get("league", {})
+            league_id = league_info.get("id")
+            season = league_info.get("season")
+            for group in league_info.get("standings", []):
+                for entry in group:
+                    team = entry.get("team", {})
+                    all_stats = entry.get("all", {})
+                    goals = all_stats.get("goals", {})
+                    try:
+                        rec = RawAPIFootballStandings(
+                            league_id=league_id,
+                            season=season,
+                            team_id=team["id"],
+                            team_name=team["name"],
+                            rank=entry["rank"],
+                            points=entry["points"],
+                            played_total=all_stats.get("played", 0),
+                            wins=all_stats.get("win", 0),
+                            draws=all_stats.get("draw", 0),
+                            losses=all_stats.get("lose", 0),
+                            goals_for=goals.get("for", 0),
+                            goals_against=goals.get("against", 0),
+                            goal_diff=entry.get("goalsDiff", 0),
+                            form=entry.get("form"),
+                        )
+                        results.append(rec)
+                    except (ValidationError, KeyError) as exc:
+                        logger.warning(
+                            "Rejected standings entry team_id=%s: %s",
+                            team.get("id"),
+                            exc,
+                        )
+                        rejected += 1
+
+        logger.info(
+            "Standings: %d teams ingested, %d rejected, for league %d season %d",
+            len(results),
+            rejected,
+            self._config.league_id,
+            self._config.season,
+        )
+        logger.info(
+            "Standings: %d API calls, %d from cache",
+            self._calls_made,
+            self._cache_hits,
+        )
+        return results
 
     # ─────────────────────────────────────────────────────────
     # Parquet output
