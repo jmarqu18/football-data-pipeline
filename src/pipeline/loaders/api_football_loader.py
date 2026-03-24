@@ -555,6 +555,7 @@ class APIFootballLoader:
         raw = self._make_request("standings", params=params, force_refresh=force_refresh)
 
         results: list[RawAPIFootballStandings] = []
+        rejected = 0
         for league_block in raw.get("response", []):
             league_info = league_block.get("league", {})
             league_id = league_info.get("id")
@@ -582,18 +583,25 @@ class APIFootballLoader:
                             form=entry.get("form"),
                         )
                         results.append(rec)
-                    except Exception as exc:
+                    except (ValidationError, KeyError) as exc:
                         logger.warning(
                             "Rejected standings entry team_id=%s: %s",
                             team.get("id"),
                             exc,
                         )
+                        rejected += 1
 
         logger.info(
-            "Standings: %d teams ingested for league %d season %d",
+            "Standings: %d teams ingested, %d rejected, for league %d season %d",
             len(results),
+            rejected,
             self._config.league_id,
             self._config.season,
+        )
+        logger.info(
+            "Standings: %d API calls, %d from cache",
+            self._calls_made,
+            self._cache_hits,
         )
         return results
 

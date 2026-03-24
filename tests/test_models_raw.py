@@ -848,7 +848,6 @@ class TestRawAPIFootballStandings:
 
     def test_standings_rejects_extra_fields(self):
         """Extra fields are forbidden."""
-        from pydantic import ValidationError
         with pytest.raises(ValidationError):
             RawAPIFootballStandings(
                 league_id=140, season=2024,
@@ -861,7 +860,6 @@ class TestRawAPIFootballStandings:
 
     def test_standings_is_frozen(self):
         """Model is immutable after construction."""
-        from pydantic import ValidationError
         s = RawAPIFootballStandings(
             league_id=140, season=2024,
             team_id=529, team_name="Barcelona",
