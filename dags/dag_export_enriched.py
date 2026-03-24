@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
 
 from pipeline.config import get_config
 from pipeline.export_enriched import run_export_enriched
@@ -24,7 +24,7 @@ _ENRICHED_DIR = Path(__file__).parents[1] / "data" / "enriched"
 
 @dag(
     dag_id="export_enriched",
-    schedule=None,
+    schedule=[Asset("player_season_features")],
     catchup=False,
     tags=["enriched"],
     doc_md=__doc__,

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
 
 from pipeline.config import get_config
 from pipeline.feature_engineering import run_feature_engineering
@@ -33,7 +33,7 @@ _RAW_DIR = Path(__file__).parents[1] / "data" / "raw"
 def build_features_dag() -> None:
     """Compute derived football metrics and write to data/features/ Parquet."""
 
-    @task
+    @task(outlets=[Asset("player_season_features")])
     def build_features_task() -> dict:
         """Compute all features from CLEAN PostgreSQL tables."""
         config = get_config()

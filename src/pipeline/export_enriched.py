@@ -16,6 +16,7 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from pipeline.db import get_engine
@@ -138,26 +139,28 @@ def build_shots_table(engine: Engine, season: str) -> pd.DataFrame:
         DataFrame with shot-level data including Juego de Posición ``zone`` column.
     """
     shots_df = pd.read_sql(
-        """
-        SELECT
-            ps.shot_id,
-            ps.player_id,
-            pl.canonical_name,
-            ps.team_id,
-            t.canonical_name AS team_name,
-            ps.season,
-            ps.minute,
-            ps.result,
-            ps.x,
-            ps.y,
-            ps.xg,
-            ps.situation,
-            ps.body_part
-        FROM player_shots ps
-        JOIN players pl ON ps.player_id = pl.player_id
-        JOIN teams t ON ps.team_id = t.team_id
-        WHERE ps.season = %(season)s
-        """,
+        text(
+            """
+            SELECT
+                ps.shot_id,
+                ps.player_id,
+                pl.canonical_name,
+                ps.team_id,
+                t.canonical_name AS team_name,
+                ps.season,
+                ps.minute,
+                ps.result,
+                ps.x,
+                ps.y,
+                ps.xg,
+                ps.situation,
+                ps.body_part
+            FROM player_shots ps
+            JOIN players pl ON ps.player_id = pl.player_id
+            JOIN teams t ON ps.team_id = t.team_id
+            WHERE ps.season = :season
+            """
+        ),
         engine,
         params={"season": season},
     )
@@ -179,6 +182,7 @@ def run_export_enriched(
     output_path: Path,
     features_path: Path,
     season: str,
+    engine: Engine | None = None,
 ) -> dict:
     """Export FEATURES + CLEAN data to a SQLite database for Datasette.
 
@@ -189,12 +193,15 @@ def run_export_enriched(
         output_path: Destination path for the ``.db`` file.
         features_path: Path to ``player_season_features.parquet``.
         season: Season string, e.g. ``"2024/2025"``.
+        engine: Optional SQLAlchemy engine. Defaults to ``get_engine()``.
+            Pass an explicit engine in tests to avoid needing a live database.
 
     Returns:
         Stats dict with keys ``players_written``, ``shots_written``, ``output_path``.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
 
     flat_df = build_flat_view(engine, features_path, season)
     shots_df = build_shots_table(engine, season)
