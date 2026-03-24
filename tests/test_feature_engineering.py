@@ -258,3 +258,43 @@ def test_shot_features_empty_returns_empty():
     shots = pd.DataFrame(columns=["player_id", "team_id", "season", "x", "y", "xg", "result", "situation", "body_part"])
     result = compute_shot_features(shots)
     assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 5: compute_scouting_features
+# ---------------------------------------------------------------------------
+from datetime import date as date_type
+from pipeline.feature_engineering import compute_scouting_features
+
+
+def test_scouting_features_basic():
+    injuries = pd.DataFrame([
+        {"player_id": 1, "injury_date": date_type(2024, 9, 15)},
+        {"player_id": 1, "injury_date": date_type(2025, 1, 10)},
+        {"player_id": 2, "injury_date": date_type(2024, 11, 1)},
+    ])
+    transfers = pd.DataFrame([
+        {"player_id": 1},
+        {"player_id": 1},
+        {"player_id": 3},
+    ])
+    reference_date = date_type(2025, 3, 24)
+    result = compute_scouting_features(injuries, transfers, reference_date)
+
+    p1 = result[result["player_id"] == 1].iloc[0]
+    assert p1["injury_count"] == 2
+    assert p1["transfer_count"] == 2
+    assert p1["days_since_last_injury"] == (reference_date - date_type(2025, 1, 10)).days
+
+    p3 = result[result["player_id"] == 3].iloc[0]
+    assert p3["injury_count"] == 0
+    assert pd.isna(p3["days_since_last_injury"])
+
+
+def test_scouting_features_no_injuries():
+    injuries = pd.DataFrame(columns=["player_id", "injury_date"])
+    transfers = pd.DataFrame([{"player_id": 1}, {"player_id": 2}])
+    reference_date = date_type(2025, 3, 24)
+    result = compute_scouting_features(injuries, transfers, reference_date)
+    assert len(result) == 2
+    assert (result["injury_count"] == 0).all()

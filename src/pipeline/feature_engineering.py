@@ -180,3 +180,45 @@ def compute_shot_features(shots_df: pd.DataFrame) -> pd.DataFrame:
     logger.info("Shot features: %d players with shot data", len(agg))
     return agg[["player_id", "xg_per_shot", "avg_shot_distance", "shot_conversion_rate",
                 "open_play_shot_pct", "headed_shot_pct"]]
+
+
+def compute_scouting_features(
+    injuries_df: pd.DataFrame,
+    transfers_df: pd.DataFrame,
+    reference_date: date,
+) -> pd.DataFrame:
+    """Compute injury and transfer history features.
+
+    Note: total_injury_days is NOT computable — player_injuries only has injury_date
+    (report date), not end_date. Use injury_count + days_since_last_injury instead.
+
+    Args:
+        injuries_df: DataFrame from player_injuries. Columns: player_id, injury_date.
+        transfers_df: DataFrame from player_transfers. Column: player_id.
+        reference_date: Date to compute days_since_last_injury from (typically today).
+
+    Returns:
+        DataFrame with columns: player_id, injury_count, transfer_count,
+        days_since_last_injury. One row per unique player across both inputs.
+    """
+    transfer_counts = transfers_df.groupby("player_id").size().reset_index(name="transfer_count")
+
+    if not injuries_df.empty:
+        inj = injuries_df.copy()
+        inj["injury_date"] = pd.to_datetime(inj["injury_date"])
+        inj_agg = inj.groupby("player_id").agg(
+            injury_count=("injury_date", "count"),
+            last_injury_date=("injury_date", "max"),
+        ).reset_index()
+        ref_ts = pd.Timestamp(reference_date)
+        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days
+        inj_agg = inj_agg.drop(columns=["last_injury_date"])
+    else:
+        inj_agg = pd.DataFrame(columns=["player_id", "injury_count", "days_since_last_injury"])
+
+    result = transfer_counts.merge(inj_agg, on="player_id", how="outer")
+    result["transfer_count"] = result["transfer_count"].fillna(0).astype(int)
+    result["injury_count"] = result["injury_count"].fillna(0).astype(int)
+
+    logger.info("Scouting features: %d players", len(result))
+    return result[["player_id", "injury_count", "transfer_count", "days_since_last_injury"]]
