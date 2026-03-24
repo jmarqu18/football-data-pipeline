@@ -11,6 +11,7 @@ import pandas as pd
 from sqlalchemy import Engine, text
 
 from pipeline.db import get_engine
+from pipeline.models.features import PlayerSeasonFeatures
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,10 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
         per90_df with added columns: xg_overperformance, npxg_per_90, xa_per_90,
         xg_chain_share, xg_buildup_per_90.
     """
-    xg_cols = ("xg_overperformance", "npxg_per_90", "xa_per_90", "xg_chain_share", "xg_buildup_per_90")
+    xg_cols = (
+        "xg_overperformance", "npxg_per_90", "xa_per_90",
+        "xg_chain_share", "xg_buildup_per_90",
+    )
 
     if advanced_df.empty:
         result = per90_df.copy()
@@ -118,17 +122,22 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
 
     # Merge per90_df with advanced on (player_id, team_id)
     merged = per90_df.merge(
-        adv[["player_id", "team_id", "xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"]],
+        adv[["player_id", "team_id", "xg", "xa", "npxg",
+              "xg_chain", "xg_buildup", "team_xg_chain"]],
         on=["player_id", "team_id"],
         how="left",
     )
 
     nineties = merged["minutes"] / 90.0
-    merged["xg_overperformance"] = np.where(merged["xg"].notna(), merged["goals"] - merged["xg"], np.nan)
+    merged["xg_overperformance"] = np.where(
+        merged["xg"].notna(), merged["goals"] - merged["xg"], np.nan
+    )
     merged["npxg_per_90"] = np.where(merged["npxg"].notna(), merged["npxg"] / nineties, np.nan)
     merged["xa_per_90"] = np.where(merged["xa"].notna(), merged["xa"] / nineties, np.nan)
     merged["xg_chain_share"] = _safe_divide(merged["xg_chain"], merged["team_xg_chain"])
-    merged["xg_buildup_per_90"] = np.where(merged["xg_buildup"].notna(), merged["xg_buildup"] / nineties, np.nan)
+    merged["xg_buildup_per_90"] = np.where(
+        merged["xg_buildup"].notna(), merged["xg_buildup"] / nineties, np.nan
+    )
 
     merged = merged.drop(columns=["xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"])
 
@@ -213,10 +222,16 @@ def compute_scouting_features(
             last_injury_date=("injury_date", "max"),
         ).reset_index()
         ref_ts = pd.Timestamp(reference_date)
-        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(object)
+        inj_agg["days_since_last_injury"] = (
+            (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(float)
+        )
         inj_agg = inj_agg.drop(columns=["last_injury_date"])
     else:
-        inj_agg = pd.DataFrame(columns=["player_id", "injury_count", "days_since_last_injury"])
+        inj_agg = pd.DataFrame({
+            "player_id": pd.Series(dtype=int),
+            "injury_count": pd.Series(dtype=float),
+            "days_since_last_injury": pd.Series(dtype=float),
+        })
 
     result = transfer_counts.merge(inj_agg, on="player_id", how="outer")
     result["transfer_count"] = result["transfer_count"].fillna(0).astype(int)
@@ -282,6 +297,9 @@ def _load_matchdays_played(raw_dir: Path | None, season_year: int) -> int | None
         return None
     standings_path = Path(raw_dir) / "api_football" / "standings.parquet"
     if not standings_path.exists():
+        # The standings endpoint is not yet active in ingestion.yaml (planned for a
+        # future sprint). Until then, this warning fires on every run and the
+        # max(starts)*90 proxy is always used — this is the expected behaviour.
         logger.warning(
             "Standings file not found at %s — using max(starts) proxy for minutes_pct",
             standings_path,
@@ -380,8 +398,6 @@ def run_feature_engineering(
     Returns:
         Dict with stats: players_total, players_with_xg, players_written.
     """
-    from pipeline.models.features import PlayerSeasonFeatures
-
     if engine is None:
         engine = get_engine()
 

@@ -94,27 +94,27 @@ def build_flat_view(engine: Engine, features_path: Path, season: str) -> pd.Data
     logger.info("Features rows for season %s: %d", season, len(features_df))
 
     players_df = pd.read_sql(
-        """
-        SELECT player_id,
-               photo_url,
-               resolution_confidence,
-               resolution_method,
-               api_football_id,
-               understat_id,
-               birth_date,
-               nationality
-        FROM players
-        """,
+        text("""
+            SELECT player_id,
+                   photo_url,
+                   resolution_confidence,
+                   resolution_method,
+                   api_football_id,
+                   understat_id,
+                   birth_date,
+                   nationality
+            FROM players
+        """),
         engine,
     )
 
     teams_df = pd.read_sql(
-        "SELECT team_id, canonical_name AS team_name, logo_url FROM teams",
+        text("SELECT team_id, canonical_name AS team_name, logo_url FROM teams"),
         engine,
     )
 
     profile_df = pd.read_sql(
-        "SELECT player_id, height_cm, weight_kg FROM player_profile",
+        text("SELECT player_id, height_cm, weight_kg FROM player_profile"),
         engine,
     )
 

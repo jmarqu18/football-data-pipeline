@@ -100,6 +100,7 @@ databases:
             minutes
           FROM player_season_stats_flat
           WHERE shots_per_90 IS NOT NULL
+            -- shots_total is not stored in the flat view; approximate via per-90 rate
             AND (shots_per_90 * minutes / 90) >= 20
           ORDER BY xg_per_shot DESC, shot_conversion_rate DESC
           LIMIT 15

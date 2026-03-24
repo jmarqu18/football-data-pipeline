@@ -12,8 +12,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import create_engine, text
 
-from pipeline.export_enriched import _assign_zone, build_flat_view, build_shots_table, run_export_enriched
-
+from pipeline.export_enriched import _assign_zone, build_flat_view, run_export_enriched
 
 # ---------------------------------------------------------------------------
 # Zone assignment (_assign_zone)
@@ -90,14 +89,17 @@ def _make_enriched_engine():
             )
         """))
         conn.execute(text(
-            "INSERT INTO players VALUES (1, 'Pedri', 'https://photo.url/pedri.jpg', 0.95, 'fuzzy', 101, 201, '2002-11-25', 'Spanish')"
+            "INSERT INTO players VALUES (1, 'Pedri',"
+            " 'https://photo.url/pedri.jpg', 0.95, 'fuzzy',"
+            " 101, 201, '2002-11-25', 'Spanish')"
         ))
         conn.execute(text(
             "INSERT INTO teams VALUES (3, 'FC Barcelona', 'https://logo.url/barca.png')"
         ))
         conn.execute(text("INSERT INTO player_profile VALUES (1, 174, 68)"))
         conn.execute(text(
-            "INSERT INTO player_shots VALUES (1, 1, 3, '2024/2025', 65, 'Goal', 0.90, 0.50, 0.35, 'OpenPlay', 'Right Foot')"
+            "INSERT INTO player_shots VALUES"
+            " (1, 1, 3, '2024/2025', 65, 'Goal', 0.90, 0.50, 0.35, 'OpenPlay', 'Right Foot')"
         ))
     return engine
 
@@ -197,7 +199,10 @@ def test_run_export_enriched_writes_tables(tmp_path):
     assert stats["shots_written"] == 1
 
     with sqlite3.connect(output_path) as conn:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        tables = {
+            r[0] for r in
+            conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
         assert "player_season_stats_flat" in tables
         assert "player_shots" in tables
 
