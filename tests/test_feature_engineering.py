@@ -5,8 +5,22 @@ Tests validate the Pydantic model for derived metrics at the player-season level
 
 from __future__ import annotations
 
-import pytest
+import math
+from datetime import date as date_type
 
+import pandas as pd
+import pytest
+from sqlalchemy import create_engine as sa_create_engine
+from sqlalchemy import text as sa_text
+
+from pipeline.feature_engineering import (
+    compute_per90_features,
+    compute_percentiles,
+    compute_scouting_features,
+    compute_shot_features,
+    compute_xg_features,
+    run_feature_engineering,
+)
 from pipeline.models.features import PlayerSeasonFeatures
 
 
@@ -104,9 +118,9 @@ def test_player_season_features_null_advanced_fields():
     assert f.injury_count == 0
 
 
-import pandas as pd
-import numpy as np
-from pipeline.feature_engineering import compute_per90_features
+# ---------------------------------------------------------------------------
+# Task 2: compute_per90_features
+# ---------------------------------------------------------------------------
 
 
 def _make_stats_row(**overrides) -> dict:
@@ -174,7 +188,6 @@ def test_per90_zero_division_safety():
 # ---------------------------------------------------------------------------
 # Task 3: compute_xg_features
 # ---------------------------------------------------------------------------
-from pipeline.feature_engineering import compute_xg_features
 
 
 def _make_advanced_row(**overrides) -> dict:
@@ -193,7 +206,9 @@ def test_xg_features_basic():
     # Team has 2 players: player 1 with xg_chain=12, player 99 with xg_chain=8
     advanced_df = pd.DataFrame([
         _make_advanced_row(player_id=1, xg=4.5, xg_chain=12.0, xg_buildup=6.0, xa=7.2, npxg=4.0),
-        _make_advanced_row(player_id=99, team_id=3, xg_chain=8.0, xg=0.5, xa=0.2, npxg=0.4, xg_buildup=2.0),
+        _make_advanced_row(
+            player_id=99, team_id=3, xg_chain=8.0, xg=0.5, xa=0.2, npxg=0.4, xg_buildup=2.0
+        ),
     ])
     result = compute_xg_features(per90_df, advanced_df)
     row = result[result["player_id"] == 1].iloc[0]
@@ -208,7 +223,9 @@ def test_xg_features_missing_understat():
     """Player with no Understat row should have None for all xG fields."""
     per90_df = pd.DataFrame([_make_stats_row(player_id=1, goals=5, minutes=2700, starts=30)])
     per90_df = compute_per90_features(per90_df)
-    advanced_df = pd.DataFrame(columns=["player_id", "team_id", "season", "xg", "xa", "npxg", "xg_chain", "xg_buildup"])
+    advanced_df = pd.DataFrame(
+        columns=["player_id", "team_id", "season", "xg", "xa", "npxg", "xg_chain", "xg_buildup"]
+    )
     result = compute_xg_features(per90_df, advanced_df)
     row = result[result["player_id"] == 1].iloc[0]
     assert pd.isna(row["xg_overperformance"])
@@ -218,8 +235,6 @@ def test_xg_features_missing_understat():
 # ---------------------------------------------------------------------------
 # Task 4: compute_shot_features
 # ---------------------------------------------------------------------------
-import math
-from pipeline.feature_engineering import compute_shot_features
 
 
 def _make_shot(**overrides) -> dict:
@@ -234,9 +249,9 @@ def _make_shot(**overrides) -> dict:
 
 def test_shot_features_basic():
     shots = pd.DataFrame([
-        _make_shot(xg=0.2, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.9, y=0.5),
-        _make_shot(xg=0.1, result="SavedShot", situation="SetPiece", body_part="Head", x=0.8, y=0.5),
-        _make_shot(xg=0.3, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.85, y=0.5),
+        _make_shot(xg=0.2, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.9),
+        _make_shot(xg=0.1, result="SavedShot", situation="SetPiece", body_part="Head", x=0.8),
+        _make_shot(xg=0.3, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.85),
     ])
     result = compute_shot_features(shots)
     assert len(result) == 1
@@ -255,7 +270,9 @@ def test_shot_features_basic():
 
 
 def test_shot_features_empty_returns_empty():
-    shots = pd.DataFrame(columns=["player_id", "team_id", "season", "x", "y", "xg", "result", "situation", "body_part"])
+    shots = pd.DataFrame(columns=[
+        "player_id", "team_id", "season", "x", "y", "xg", "result", "situation", "body_part",
+    ])
     result = compute_shot_features(shots)
     assert len(result) == 0
 
@@ -263,8 +280,6 @@ def test_shot_features_empty_returns_empty():
 # ---------------------------------------------------------------------------
 # Task 5: compute_scouting_features
 # ---------------------------------------------------------------------------
-from datetime import date as date_type
-from pipeline.feature_engineering import compute_scouting_features
 
 
 def test_scouting_features_basic():
@@ -303,7 +318,6 @@ def test_scouting_features_no_injuries():
 # ---------------------------------------------------------------------------
 # Task 6: compute_percentiles
 # ---------------------------------------------------------------------------
-from pipeline.feature_engineering import compute_percentiles
 
 
 def test_percentiles_rank_within_position():
@@ -347,8 +361,6 @@ def test_percentiles_null_metric_yields_null_pct():
 # ---------------------------------------------------------------------------
 # Task 7: run_feature_engineering integration test
 # ---------------------------------------------------------------------------
-from sqlalchemy import create_engine as sa_create_engine, text as sa_text
-from pipeline.feature_engineering import run_feature_engineering
 
 
 def test_run_feature_engineering_writes_parquet(tmp_path):

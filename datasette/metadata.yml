@@ -1,0 +1,143 @@
+title: "Football Analytics — La Liga 2024/25"
+description: "Pipeline de datos multi-fuente: API-Football + Understat. Métricas por jugador, tiros shot-level y entity resolution."
+
+plugins:
+  datasette-vega: {}
+
+databases:
+  enriched:
+    tables:
+      player_season_stats_flat:
+        description: "Vista plana por jugador/temporada con todas las métricas: per-90, xG, calidad de tiro, scouting y percentiles por posición."
+        sort: xg_overperformance
+        sort_desc: true
+      player_shots:
+        description: "Tiros individuales con coordenadas normalizadas (Understat) y zona táctica según el modelo Juego de Posición."
+        sort: xg
+        sort_desc: true
+
+    queries:
+      top_xg_overperformance:
+        title: "Top 10 por xG Overperformance"
+        description: "Jugadores que más superan su xG esperado — finalizadores que 'superan' sus modelos estadísticos."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            position,
+            goals_per_90,
+            ROUND(xg_overperformance, 3) AS xg_overperformance,
+            ROUND(npxg_per_90, 3) AS npxg_per_90,
+            minutes
+          FROM player_season_stats_flat
+          WHERE xg_overperformance IS NOT NULL
+          ORDER BY xg_overperformance DESC
+          LIMIT 10
+
+      most_injured:
+        title: "Jugadores con más lesiones"
+        description: "Historial de lesiones registradas en la temporada — útil para análisis de disponibilidad."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            position,
+            injury_count,
+            days_since_last_injury,
+            minutes,
+            appearances
+          FROM player_season_stats_flat
+          WHERE injury_count > 0
+          ORDER BY injury_count DESC, days_since_last_injury ASC
+          LIMIT 20
+
+      low_confidence:
+        title: "Jugadores con confidence < 0.8"
+        description: "Jugadores donde la entity resolution entre API-Football y Understat no fue concluyente — posibles errores de cruce de fuentes."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            ROUND(resolution_confidence, 3) AS resolution_confidence,
+            resolution_method,
+            api_football_id,
+            understat_id,
+            minutes
+          FROM player_season_stats_flat
+          WHERE resolution_confidence < 0.8
+          ORDER BY resolution_confidence ASC
+
+      shots_by_zone:
+        title: "Distribución de tiros por zona (Juego de Posición)"
+        description: "Volumen, xG medio y conversión por zona táctica. Las zonas siguen el modelo de 5 carriles verticales × 3 profundidades del Juego de Posición."
+        sql: |
+          SELECT
+            zone,
+            COUNT(*) AS total_shots,
+            ROUND(AVG(xg), 4) AS avg_xg,
+            SUM(CASE WHEN result = 'Goal' THEN 1 ELSE 0 END) AS goals,
+            ROUND(
+              100.0 * SUM(CASE WHEN result = 'Goal' THEN 1 ELSE 0 END) / COUNT(*),
+              2
+            ) AS conversion_pct
+          FROM player_shots
+          GROUP BY zone
+          ORDER BY total_shots DESC
+
+      efficient_finishers:
+        title: "Finalizadores eficientes (xG/shot + conversión)"
+        description: "Jugadores con alta calidad de disparo y buena conversión, mínimo 20 tiros en la temporada."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            position,
+            ROUND(xg_per_shot, 3) AS xg_per_shot,
+            ROUND(shot_conversion_rate, 3) AS shot_conversion_rate,
+            ROUND(shots_per_90, 2) AS shots_per_90,
+            ROUND(pct_xg_per_shot, 1) AS pct_xg_per_shot,
+            ROUND(pct_shot_conversion_rate, 1) AS pct_shot_conversion_rate,
+            minutes
+          FROM player_season_stats_flat
+          WHERE shots_per_90 IS NOT NULL
+            -- shots_total is not stored in the flat view; approximate via per-90 rate
+            AND (shots_per_90 * minutes / 90) >= 20
+          ORDER BY xg_per_shot DESC, shot_conversion_rate DESC
+          LIMIT 15
+
+      top_playmakers_by_position:
+        title: "Top playmakers por posición"
+        description: "Mejores creadores de juego ordenados por posición y xA por 90 minutos."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            position,
+            ROUND(xa_per_90, 3) AS xa_per_90,
+            ROUND(key_passes_per_90, 2) AS key_passes_per_90,
+            ROUND(assists_per_90, 3) AS assists_per_90,
+            ROUND(pct_assists_per_90, 1) AS pct_assists_per_90,
+            minutes
+          FROM player_season_stats_flat
+          WHERE xa_per_90 IS NOT NULL
+            AND position IS NOT NULL
+          ORDER BY position, xa_per_90 DESC
+
+      underused_talent:
+        title: "Talento subexplotado (buen xG, pocos minutos)"
+        description: "Jugadores con xG overperformance positivo pero con menos del 50% de los minutos disponibles — posibles oportunidades de mercado."
+        sql: |
+          SELECT
+            canonical_name,
+            team_name,
+            position,
+            ROUND(xg_overperformance, 3) AS xg_overperformance,
+            ROUND(minutes_pct, 2) AS minutes_pct,
+            minutes,
+            ROUND(goals_per_90, 3) AS goals_per_90,
+            ROUND(npxg_per_90, 3) AS npxg_per_90
+          FROM player_season_stats_flat
+          WHERE xg_overperformance > 0
+            AND minutes_pct < 0.5
+            AND minutes >= 450
+          ORDER BY xg_overperformance DESC

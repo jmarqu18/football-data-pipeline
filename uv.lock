@@ -651,6 +651,17 @@ wheels = [
 ]
 
 [[package]]
+name = "datasette-vega"
+version = "0.6.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "datasette" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/9e/7496dfa4f7e2ce93a036fe9920dcbd71c7297783d2337fe85f1fef9f6786/datasette_vega-0.6.2-py3-none-any.whl", hash = "sha256:6aca6a40f0b244d6d05548bfff94a99f0ef96bd5b89ade241f0d389f7a01a063", size = 1837953, upload-time = "2018-07-29T00:17:20.791Z" },
+]
+
+[[package]]
 name = "deprecated"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -803,6 +814,7 @@ source = { editable = "." }
 dependencies = [
     { name = "apache-airflow" },
     { name = "datasette" },
+    { name = "datasette-vega" },
     { name = "httpx" },
     { name = "pandas" },
     { name = "psycopg2-binary" },
@@ -830,6 +842,7 @@ dev = [
 requires-dist = [
     { name = "apache-airflow", specifier = ">=3.1.8" },
     { name = "datasette", specifier = ">=0.65.2" },
+    { name = "datasette-vega", specifier = ">=0.6" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pandas", specifier = ">=2.1.0,<3.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.11" },

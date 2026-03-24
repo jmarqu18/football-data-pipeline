@@ -19,6 +19,7 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "psycopg2-binary>=2.9.11",
     "datasette>=0.65.2",
+    "datasette-vega>=0.6",
     "apache-airflow>=3.1.8",
 ]
 
