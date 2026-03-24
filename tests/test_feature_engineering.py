@@ -102,3 +102,70 @@ def test_player_season_features_null_advanced_fields():
     )
     assert f.xg_overperformance is None
     assert f.injury_count == 0
+
+
+import pandas as pd
+import numpy as np
+from pipeline.feature_engineering import compute_per90_features
+
+
+def _make_stats_row(**overrides) -> dict:
+    base = {
+        "player_id": 1, "canonical_name": "Pedri", "known_name": "Pedri",
+        "team_id": 3, "season": "2024/2025", "position": "Midfielder",
+        "appearances": 30, "starts": 28, "minutes": 2700,
+        "goals": 5, "assists": 8, "shots_total": 50, "shots_on_target": 20,
+        "key_passes": 45, "tackles": 25,
+        "dribbles_attempted": 60, "dribbles_successful": 40,
+        "duels_total": 100, "duels_won": 52,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_per90_basic_calculation():
+    """Each (player, team) row gets its own per-90 metrics."""
+    df = pd.DataFrame([_make_stats_row(starts=28)])
+    # max(starts) = 28 → season_max_minutes = 28 * 90 = 2520
+    result = compute_per90_features(df)
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["goals_per_90"] == pytest.approx(5 / (2700 / 90), abs=1e-4)
+    assert row["assists_per_90"] == pytest.approx(8 / (2700 / 90), abs=1e-4)
+    assert row["minutes_pct"] == pytest.approx(2700 / (28 * 90), abs=1e-4)
+    assert row["games_started_pct"] == pytest.approx(28 / 30.0, abs=1e-4)
+    assert row["shots_on_target_pct"] == pytest.approx(20 / 50.0, abs=1e-4)
+    assert row["dribble_success_rate"] == pytest.approx(40 / 60.0, abs=1e-4)
+    assert row["duels_won_pct"] == pytest.approx(52 / 100.0, abs=1e-4)
+
+
+def test_per90_filters_min_minutes():
+    df = pd.DataFrame([
+        _make_stats_row(player_id=1, minutes=2700),
+        _make_stats_row(player_id=2, minutes=300, team_id=2),  # Below 450 min
+    ])
+    result = compute_per90_features(df)
+    assert len(result) == 1
+    assert result.iloc[0]["player_id"] == 1
+
+
+def test_per90_keeps_both_rows_for_transferred_player():
+    """Two stints for the same player (different teams) stay as two rows."""
+    df = pd.DataFrame([
+        _make_stats_row(player_id=1, team_id=1, minutes=1000, goals=3, starts=11),
+        _make_stats_row(player_id=1, team_id=2, minutes=1500, goals=5, starts=17),
+    ])
+    result = compute_per90_features(df)
+    assert len(result) == 2
+    # Each row has its own per-90
+    row1 = result[result["team_id"] == 1].iloc[0]
+    assert row1["goals_per_90"] == pytest.approx(3 / (1000 / 90), abs=1e-4)
+    row2 = result[result["team_id"] == 2].iloc[0]
+    assert row2["goals_per_90"] == pytest.approx(5 / (1500 / 90), abs=1e-4)
+
+
+def test_per90_zero_division_safety():
+    """Player with 0 shots_total should have shots_on_target_pct = NaN."""
+    df = pd.DataFrame([_make_stats_row(shots_total=0, shots_on_target=0)])
+    result = compute_per90_features(df)
+    assert pd.isna(result.iloc[0]["shots_on_target_pct"])
