@@ -342,3 +342,52 @@ def test_percentiles_null_metric_yields_null_pct():
     assert pd.isna(row["pct_xg_overperformance"])
     assert pd.isna(row["pct_npxg_per_90"])
     assert not pd.isna(row["pct_goals_per_90"])
+
+
+# ---------------------------------------------------------------------------
+# Task 7: run_feature_engineering integration test
+# ---------------------------------------------------------------------------
+from sqlalchemy import create_engine as sa_create_engine, text as sa_text
+from pipeline.feature_engineering import run_feature_engineering
+
+
+def test_run_feature_engineering_writes_parquet(tmp_path):
+    """Smoke test: run full pipeline with minimal SQLite fixture, verify Parquet output."""
+    engine = sa_create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(sa_text("""CREATE TABLE players (
+            player_id INTEGER PRIMARY KEY, canonical_name TEXT, known_name TEXT)"""))
+        conn.execute(sa_text("""CREATE TABLE player_season_stats (
+            player_id INTEGER, team_id INTEGER, season TEXT, position TEXT,
+            appearances INTEGER, starts INTEGER, minutes INTEGER,
+            goals INTEGER, assists INTEGER, shots_total INTEGER, shots_on_target INTEGER,
+            key_passes INTEGER, tackles INTEGER, dribbles_attempted INTEGER,
+            dribbles_successful INTEGER, duels_total INTEGER, duels_won INTEGER)"""))
+        conn.execute(sa_text("""CREATE TABLE player_season_advanced (
+            player_id INTEGER, team_id INTEGER, season TEXT,
+            xg REAL, xa REAL, npxg REAL, xg_chain REAL, xg_buildup REAL,
+            shots INTEGER, key_passes INTEGER)"""))
+        conn.execute(sa_text("""CREATE TABLE player_shots (
+            player_id INTEGER, team_id INTEGER, season TEXT,
+            x REAL, y REAL, xg REAL, result TEXT, situation TEXT, body_part TEXT)"""))
+        conn.execute(sa_text("""CREATE TABLE player_injuries (
+            player_id INTEGER, injury_date TEXT)"""))
+        conn.execute(sa_text("""CREATE TABLE player_transfers (
+            player_id INTEGER)"""))
+        # Insert one player with 2700 minutes (qualifies for features)
+        conn.execute(sa_text("INSERT INTO players VALUES (1, 'Pedri', 'Pedri')"))
+        conn.execute(sa_text(
+            "INSERT INTO player_season_stats VALUES "
+            "(1, 3, '2024/2025', 'Midfielder', 30, 28, 2700, 5, 8, 50, 20, 45, 25, 60, 40, 100, 52)"
+        ))
+
+    output_path = tmp_path / "player_season_features.parquet"
+    result = run_feature_engineering(output_path, season="2024/2025", engine=engine)
+
+    assert output_path.exists()
+    out_df = pd.read_parquet(output_path)
+    assert len(out_df) == 1
+    assert out_df.iloc[0]["player_id"] == 1
+    assert "goals_per_90" in out_df.columns
+    assert "injury_count" in out_df.columns
+    assert result["players_written"] == 1

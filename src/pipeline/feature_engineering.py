@@ -264,3 +264,189 @@ def compute_percentiles(df: pd.DataFrame) -> pd.DataFrame:
         len(_PERCENTILE_METRICS),
     )
     return result
+
+
+def _load_matchdays_played(raw_dir: Path | None, season_year: int) -> int | None:
+    """Read matchdays_played from standings Parquet if available.
+
+    Args:
+        raw_dir: Root of data/raw/ directory. If None, standings not loaded.
+        season_year: API-Football season year (e.g. 2024 for 2024/25).
+
+    Returns:
+        Number of matchdays played, or None if standings file not found.
+    """
+    if raw_dir is None:
+        return None
+    standings_path = Path(raw_dir) / "api_football" / "standings.parquet"
+    if not standings_path.exists():
+        logger.warning(
+            "Standings file not found at %s — using max(starts) proxy for minutes_pct",
+            standings_path,
+        )
+        return None
+    df = pd.read_parquet(standings_path)
+    season_df = df[df["season"] == season_year]
+    if season_df.empty:
+        return None
+    matchdays = int(season_df["played_total"].max())
+    logger.info("Standings: %d matchdays played (season %d)", matchdays, season_year)
+    return matchdays
+
+
+def load_clean_data(
+    engine: Engine,
+    season: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load all 5 relevant CLEAN tables from PostgreSQL for a given season.
+
+    Returns:
+        Tuple: (stats_df, advanced_df, shots_df, injuries_df, transfers_df).
+        stats_df includes canonical_name, known_name via JOIN with players table.
+    """
+    with engine.connect() as conn:
+        stats_df = pd.read_sql(
+            text("""
+                SELECT pss.player_id, p.canonical_name, p.known_name,
+                    pss.team_id, pss.season, pss.position,
+                    pss.appearances, pss.starts, pss.minutes,
+                    pss.goals, pss.assists, pss.shots_total, pss.shots_on_target,
+                    pss.key_passes, pss.tackles,
+                    pss.dribbles_attempted, pss.dribbles_successful,
+                    pss.duels_total, pss.duels_won
+                FROM player_season_stats pss
+                JOIN players p ON pss.player_id = p.player_id
+                WHERE pss.season = :season
+            """),
+            conn,
+            params={"season": season},
+        )
+        advanced_df = pd.read_sql(
+            text(
+                "SELECT player_id, team_id, season, xg, xa, npxg, xg_chain, xg_buildup"
+                " FROM player_season_advanced WHERE season = :season"
+            ),
+            conn,
+            params={"season": season},
+        )
+        shots_df = pd.read_sql(
+            text(
+                "SELECT player_id, team_id, season, x, y, xg, result, situation, body_part"
+                " FROM player_shots WHERE season = :season"
+            ),
+            conn,
+            params={"season": season},
+        )
+        injuries_df = pd.read_sql(
+            text("SELECT player_id, injury_date FROM player_injuries"),
+            conn,
+        )
+        transfers_df = pd.read_sql(
+            text("SELECT player_id FROM player_transfers"),
+            conn,
+        )
+
+    logger.info(
+        "Loaded: %d stat rows, %d advanced, %d shots, %d injuries, %d transfers",
+        len(stats_df),
+        len(advanced_df),
+        len(shots_df),
+        len(injuries_df),
+        len(transfers_df),
+    )
+    return stats_df, advanced_df, shots_df, injuries_df, transfers_df
+
+
+def run_feature_engineering(
+    output_path: Path,
+    season: str,
+    engine: Engine | None = None,
+    raw_dir: Path | None = None,
+) -> dict[str, int]:
+    """Orchestrate CLEAN → FEATURES pipeline.
+
+    Reads from PostgreSQL, computes all feature groups, validates via Pydantic v2,
+    writes to Parquet. Only stints with >= 450 minutes get feature records.
+
+    Args:
+        output_path: Destination Parquet file path.
+        season: Season string, e.g. "2024/2025".
+        engine: Optional SQLAlchemy engine. If None, reads DATABASE_URL env var.
+        raw_dir: Optional path to data/raw/ for loading standings Parquet.
+                 If None, minutes_pct falls back to max(starts)*90 proxy.
+
+    Returns:
+        Dict with stats: players_total, players_with_xg, players_written.
+    """
+    from pipeline.models.features import PlayerSeasonFeatures
+    from pipeline.transform_clean import get_engine
+
+    if engine is None:
+        engine = get_engine()
+
+    # Derive season_year for standings lookup (e.g. "2024/2025" → 2024)
+    season_year = int(season.split("/")[0])
+    matchdays_played = _load_matchdays_played(raw_dir, season_year)
+
+    stats_df, advanced_df, shots_df, injuries_df, transfers_df = load_clean_data(engine, season)
+
+    # Compute feature groups
+    base = compute_per90_features(stats_df, matchdays_played=matchdays_played)
+    base = compute_xg_features(base, advanced_df)
+
+    shot_feats = compute_shot_features(shots_df)
+    base = base.merge(shot_feats, on="player_id", how="left")
+
+    scouting = compute_scouting_features(injuries_df, transfers_df, reference_date=date.today())
+    base = base.merge(scouting, on="player_id", how="left")
+
+    # Fill scouting defaults for players not in injuries/transfers tables
+    base["injury_count"] = base["injury_count"].fillna(0).astype(int)
+    base["transfer_count"] = base["transfer_count"].fillna(0).astype(int)
+
+    base = compute_percentiles(base)
+
+    # Clamp minutes_pct to [0, 1] — proxy denominator may undercount true matchdays
+    if "minutes_pct" in base.columns:
+        base["minutes_pct"] = base["minutes_pct"].clip(upper=1.0)
+
+    # Select only columns declared in PlayerSeasonFeatures to avoid extra-field rejections
+    model_fields = set(PlayerSeasonFeatures.model_fields.keys())
+    cols_to_keep = [c for c in base.columns if c in model_fields]
+    base = base[cols_to_keep]
+
+    # Replace NaN with None so Pydantic Optional[float] fields receive None, not nan
+    records = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in base.to_dict(orient="records")
+    ]
+    validated: list[dict] = []
+    rejected = 0
+    for rec in records:
+        try:
+            validated.append(PlayerSeasonFeatures(**rec).model_dump())
+        except Exception as exc:
+            logger.warning("Rejected feature record player_id=%s: %s", rec.get("player_id"), exc)
+            rejected += 1
+
+    if not validated:
+        logger.warning("No feature records to write for season %s", season)
+        return {"players_total": len(base), "players_with_xg": 0, "players_written": 0}
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(validated).to_parquet(output_path, index=False)
+
+    players_with_xg = sum(1 for r in validated if r.get("xg_overperformance") is not None)
+    logger.info(
+        "Features written: %d stints (%d with xG data, %d rejected) → %s",
+        len(validated),
+        players_with_xg,
+        rejected,
+        output_path,
+    )
+    return {
+        "players_total": len(base),
+        "players_with_xg": players_with_xg,
+        "players_written": len(validated),
+    }
