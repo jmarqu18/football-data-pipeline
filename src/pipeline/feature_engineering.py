@@ -133,3 +133,50 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
     resolved = merged["xg_overperformance"].notna().sum()
     logger.info("xG features: %d/%d stints with Understat data", resolved, len(merged))
     return merged
+
+
+def compute_shot_features(shots_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute shot quality aggregations from player_shots.
+
+    Distance formula: goal at (1.0, 0.5) normalized, pitch 105m × 68m.
+    distance = sqrt(((1-x)*105)^2 + ((y-0.5)*68)^2)
+
+    Args:
+        shots_df: DataFrame from player_shots. Required columns: player_id, x, y, xg,
+            result, situation, body_part.
+
+    Returns:
+        DataFrame with one row per player_id: xg_per_shot, avg_shot_distance,
+        shot_conversion_rate, open_play_shot_pct, headed_shot_pct.
+    """
+    if shots_df.empty:
+        return pd.DataFrame(
+            columns=["player_id", "xg_per_shot", "avg_shot_distance",
+                     "shot_conversion_rate", "open_play_shot_pct", "headed_shot_pct"]
+        )
+
+    df = shots_df.copy()
+    df["is_goal"] = (df["result"] == "Goal").astype(int)
+    df["is_open_play"] = (df["situation"] == "OpenPlay").astype(int)
+    df["is_header"] = (df["body_part"] == "Head").astype(int)
+    df["shot_distance"] = np.sqrt(
+        ((1.0 - df["x"]) * 105) ** 2 + ((df["y"] - 0.5) * 68) ** 2
+    )
+
+    agg = df.groupby("player_id").agg(
+        total_shots=("xg", "count"),
+        total_xg=("xg", "sum"),
+        total_goals=("is_goal", "sum"),
+        total_open_play=("is_open_play", "sum"),
+        total_headers=("is_header", "sum"),
+        avg_shot_distance=("shot_distance", "mean"),
+    ).reset_index()
+
+    agg["xg_per_shot"] = _safe_divide(agg["total_xg"], agg["total_shots"])
+    agg["shot_conversion_rate"] = _safe_divide(agg["total_goals"], agg["total_shots"])
+    agg["open_play_shot_pct"] = _safe_divide(agg["total_open_play"], agg["total_shots"])
+    agg["headed_shot_pct"] = _safe_divide(agg["total_headers"], agg["total_shots"])
+
+    logger.info("Shot features: %d players with shot data", len(agg))
+    return agg[["player_id", "xg_per_shot", "avg_shot_distance", "shot_conversion_rate",
+                "open_play_shot_pct", "headed_shot_pct"]]

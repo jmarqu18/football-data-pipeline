@@ -213,3 +213,48 @@ def test_xg_features_missing_understat():
     row = result[result["player_id"] == 1].iloc[0]
     assert pd.isna(row["xg_overperformance"])
     assert pd.isna(row["npxg_per_90"])
+
+
+# ---------------------------------------------------------------------------
+# Task 4: compute_shot_features
+# ---------------------------------------------------------------------------
+import math
+from pipeline.feature_engineering import compute_shot_features
+
+
+def _make_shot(**overrides) -> dict:
+    base = {
+        "player_id": 1, "team_id": 3, "season": "2024/2025",
+        "x": 0.85, "y": 0.5, "xg": 0.15, "result": "SavedShot",
+        "situation": "OpenPlay", "body_part": "Right Foot",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_shot_features_basic():
+    shots = pd.DataFrame([
+        _make_shot(xg=0.2, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.9, y=0.5),
+        _make_shot(xg=0.1, result="SavedShot", situation="SetPiece", body_part="Head", x=0.8, y=0.5),
+        _make_shot(xg=0.3, result="Goal", situation="OpenPlay", body_part="Right Foot", x=0.85, y=0.5),
+    ])
+    result = compute_shot_features(shots)
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["xg_per_shot"] == pytest.approx((0.2 + 0.1 + 0.3) / 3, abs=1e-4)
+    assert row["shot_conversion_rate"] == pytest.approx(2 / 3, abs=1e-4)
+    assert row["open_play_shot_pct"] == pytest.approx(2 / 3, abs=1e-4)
+    assert row["headed_shot_pct"] == pytest.approx(1 / 3, abs=1e-4)
+    # avg_shot_distance: distance from goal (1.0, 0.5) using pitch 105x68m
+    expected_dist = (
+        math.sqrt(((1 - 0.9) * 105) ** 2 + ((0.5 - 0.5) * 68) ** 2)
+        + math.sqrt(((1 - 0.8) * 105) ** 2 + ((0.5 - 0.5) * 68) ** 2)
+        + math.sqrt(((1 - 0.85) * 105) ** 2 + ((0.5 - 0.5) * 68) ** 2)
+    ) / 3
+    assert row["avg_shot_distance"] == pytest.approx(expected_dist, abs=0.01)
+
+
+def test_shot_features_empty_returns_empty():
+    shots = pd.DataFrame(columns=["player_id", "team_id", "season", "x", "y", "xg", "result", "situation", "body_part"])
+    result = compute_shot_features(shots)
+    assert len(result) == 0
