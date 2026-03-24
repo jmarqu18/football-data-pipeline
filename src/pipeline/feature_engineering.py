@@ -222,3 +222,45 @@ def compute_scouting_features(
 
     logger.info("Scouting features: %d players", len(result))
     return result[["player_id", "injury_count", "transfer_count", "days_since_last_injury"]]
+
+
+_PERCENTILE_METRICS: list[tuple[str, str]] = [
+    ("goals_per_90", "pct_goals_per_90"),
+    ("assists_per_90", "pct_assists_per_90"),
+    ("xg_overperformance", "pct_xg_overperformance"),
+    ("npxg_per_90", "pct_npxg_per_90"),
+    ("xg_per_shot", "pct_xg_per_shot"),
+    ("shot_conversion_rate", "pct_shot_conversion_rate"),
+    ("tackles_per_90", "pct_tackles_per_90"),
+]
+
+
+def compute_percentiles(df: pd.DataFrame) -> pd.DataFrame:
+    """Add percentile rank columns for key metrics, grouped by position.
+
+    Only non-null values participate in ranking. Players with a null metric
+    receive NaN for that percentile column.
+
+    Args:
+        df: DataFrame with columns: player_id, position, and all metric columns
+            listed in _PERCENTILE_METRICS.
+
+    Returns:
+        df with added pct_* columns (0-100 scale).
+    """
+    result = df.copy()
+    for metric, pct_col in _PERCENTILE_METRICS:
+        if metric not in result.columns:
+            result[pct_col] = np.nan
+            continue
+        result[pct_col] = (
+            result.groupby("position", group_keys=False)[metric]
+            .rank(pct=True, na_option="keep")
+            * 100
+        )
+    logger.info(
+        "Percentiles computed for %d stints across %d metrics",
+        len(result),
+        len(_PERCENTILE_METRICS),
+    )
+    return result

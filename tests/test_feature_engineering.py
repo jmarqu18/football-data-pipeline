@@ -298,3 +298,47 @@ def test_scouting_features_no_injuries():
     result = compute_scouting_features(injuries, transfers, reference_date)
     assert len(result) == 2
     assert (result["injury_count"] == 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Task 6: compute_percentiles
+# ---------------------------------------------------------------------------
+from pipeline.feature_engineering import compute_percentiles
+
+
+def test_percentiles_rank_within_position():
+    """Percentiles should be computed within position groups."""
+    df = pd.DataFrame([
+        {"player_id": 1, "position": "Midfielder", "goals_per_90": 0.1,
+         "assists_per_90": 0.3, "xg_overperformance": 0.0, "npxg_per_90": 0.1,
+         "xg_per_shot": 0.10, "shot_conversion_rate": 0.09, "tackles_per_90": 1.0},
+        {"player_id": 2, "position": "Midfielder", "goals_per_90": 0.3,
+         "assists_per_90": 0.1, "xg_overperformance": 0.5, "npxg_per_90": 0.2,
+         "xg_per_shot": 0.15, "shot_conversion_rate": 0.15, "tackles_per_90": 0.5},
+        {"player_id": 3, "position": "Defender", "goals_per_90": 0.5,
+         "assists_per_90": 0.0, "xg_overperformance": 0.0, "npxg_per_90": 0.05,
+         "xg_per_shot": 0.07, "shot_conversion_rate": 0.05, "tackles_per_90": 3.0},
+    ])
+    result = compute_percentiles(df)
+
+    p1 = result[result["player_id"] == 1].iloc[0]
+    p2 = result[result["player_id"] == 2].iloc[0]
+    assert p2["pct_goals_per_90"] > p1["pct_goals_per_90"]
+
+    # Player 3 (Defender, only one) should have 100th percentile
+    p3 = result[result["player_id"] == 3].iloc[0]
+    assert p3["pct_goals_per_90"] == pytest.approx(100.0, abs=1.0)
+
+
+def test_percentiles_null_metric_yields_null_pct():
+    """If xg_overperformance is None/NaN, pct_xg_overperformance should be NaN."""
+    df = pd.DataFrame([
+        {"player_id": 1, "position": "Midfielder", "goals_per_90": 0.2,
+         "assists_per_90": 0.3, "xg_overperformance": None, "npxg_per_90": None,
+         "xg_per_shot": None, "shot_conversion_rate": None, "tackles_per_90": 1.0},
+    ])
+    result = compute_percentiles(df)
+    row = result.iloc[0]
+    assert pd.isna(row["pct_xg_overperformance"])
+    assert pd.isna(row["pct_npxg_per_90"])
+    assert not pd.isna(row["pct_goals_per_90"])
