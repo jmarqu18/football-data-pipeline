@@ -1,4 +1,5 @@
 """Feature engineering: construcción de métricas derivadas (CLEAN → FEATURES)."""
+
 from __future__ import annotations
 
 import logging
@@ -99,8 +100,11 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
         xg_chain_share, xg_buildup_per_90.
     """
     xg_cols = (
-        "xg_overperformance", "npxg_per_90", "xa_per_90",
-        "xg_chain_share", "xg_buildup_per_90",
+        "xg_overperformance",
+        "npxg_per_90",
+        "xa_per_90",
+        "xg_chain_share",
+        "xg_buildup_per_90",
     )
 
     if advanced_df.empty:
@@ -122,8 +126,9 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
 
     # Merge per90_df with advanced on (player_id, team_id)
     merged = per90_df.merge(
-        adv[["player_id", "team_id", "xg", "xa", "npxg",
-              "xg_chain", "xg_buildup", "team_xg_chain"]],
+        adv[
+            ["player_id", "team_id", "xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"]
+        ],
         on=["player_id", "team_id"],
         how="left",
     )
@@ -162,26 +167,34 @@ def compute_shot_features(shots_df: pd.DataFrame) -> pd.DataFrame:
     """
     if shots_df.empty:
         return pd.DataFrame(
-            columns=["player_id", "xg_per_shot", "avg_shot_distance",
-                     "shot_conversion_rate", "open_play_shot_pct", "headed_shot_pct"]
+            columns=[
+                "player_id",
+                "xg_per_shot",
+                "avg_shot_distance",
+                "shot_conversion_rate",
+                "open_play_shot_pct",
+                "headed_shot_pct",
+            ]
         )
 
     df = shots_df.copy()
     df["is_goal"] = (df["result"] == "Goal").astype(int)
     df["is_open_play"] = (df["situation"] == "OpenPlay").astype(int)
     df["is_header"] = (df["body_part"] == "Head").astype(int)
-    df["shot_distance"] = np.sqrt(
-        ((1.0 - df["x"]) * 105) ** 2 + ((df["y"] - 0.5) * 68) ** 2
-    )
+    df["shot_distance"] = np.sqrt(((1.0 - df["x"]) * 105) ** 2 + ((df["y"] - 0.5) * 68) ** 2)
 
-    agg = df.groupby("player_id").agg(
-        total_shots=("xg", "count"),
-        total_xg=("xg", "sum"),
-        total_goals=("is_goal", "sum"),
-        total_open_play=("is_open_play", "sum"),
-        total_headers=("is_header", "sum"),
-        avg_shot_distance=("shot_distance", "mean"),
-    ).reset_index()
+    agg = (
+        df.groupby("player_id")
+        .agg(
+            total_shots=("xg", "count"),
+            total_xg=("xg", "sum"),
+            total_goals=("is_goal", "sum"),
+            total_open_play=("is_open_play", "sum"),
+            total_headers=("is_header", "sum"),
+            avg_shot_distance=("shot_distance", "mean"),
+        )
+        .reset_index()
+    )
 
     agg["xg_per_shot"] = _safe_divide(agg["total_xg"], agg["total_shots"])
     agg["shot_conversion_rate"] = _safe_divide(agg["total_goals"], agg["total_shots"])
@@ -189,8 +202,16 @@ def compute_shot_features(shots_df: pd.DataFrame) -> pd.DataFrame:
     agg["headed_shot_pct"] = _safe_divide(agg["total_headers"], agg["total_shots"])
 
     logger.info("Shot features: %d players with shot data", len(agg))
-    return agg[["player_id", "xg_per_shot", "avg_shot_distance", "shot_conversion_rate",
-                "open_play_shot_pct", "headed_shot_pct"]]
+    return agg[
+        [
+            "player_id",
+            "xg_per_shot",
+            "avg_shot_distance",
+            "shot_conversion_rate",
+            "open_play_shot_pct",
+            "headed_shot_pct",
+        ]
+    ]
 
 
 def compute_scouting_features(
@@ -217,21 +238,27 @@ def compute_scouting_features(
     if not injuries_df.empty:
         inj = injuries_df.copy()
         inj["injury_date"] = pd.to_datetime(inj["injury_date"])
-        inj_agg = inj.groupby("player_id").agg(
-            injury_count=("injury_date", "count"),
-            last_injury_date=("injury_date", "max"),
-        ).reset_index()
+        inj_agg = (
+            inj.groupby("player_id")
+            .agg(
+                injury_count=("injury_date", "count"),
+                last_injury_date=("injury_date", "max"),
+            )
+            .reset_index()
+        )
         ref_ts = pd.Timestamp(reference_date)
-        inj_agg["days_since_last_injury"] = (
-            (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(float)
+        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(
+            float
         )
         inj_agg = inj_agg.drop(columns=["last_injury_date"])
     else:
-        inj_agg = pd.DataFrame({
-            "player_id": pd.Series(dtype=int),
-            "injury_count": pd.Series(dtype=float),
-            "days_since_last_injury": pd.Series(dtype=float),
-        })
+        inj_agg = pd.DataFrame(
+            {
+                "player_id": pd.Series(dtype=int),
+                "injury_count": pd.Series(dtype=float),
+                "days_since_last_injury": pd.Series(dtype=float),
+            }
+        )
 
     result = transfer_counts.merge(inj_agg, on="player_id", how="outer")
     result["transfer_count"] = result["transfer_count"].fillna(0).astype(int)
@@ -271,8 +298,7 @@ def compute_percentiles(df: pd.DataFrame) -> pd.DataFrame:
             result[pct_col] = np.nan
             continue
         result[pct_col] = (
-            result.groupby("position", group_keys=False)[metric]
-            .rank(pct=True, na_option="keep")
+            result.groupby("position", group_keys=False)[metric].rank(pct=True, na_option="keep")
             * 100
         )
     logger.info(

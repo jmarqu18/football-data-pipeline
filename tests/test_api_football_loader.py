@@ -45,9 +45,7 @@ def _make_config(tmp_path: Path, **overrides) -> ApiFootballConfig:
         "endpoints": ("players_stats", "injuries", "transfers"),
         "cache_dir": tmp_path / "cache",
         "cache_ttl_hours": 168,
-        "rate_limit": RateLimitConfig(
-            max_calls_per_day=100, delay_between_calls=0.0
-        ),
+        "rate_limit": RateLimitConfig(max_calls_per_day=100, delay_between_calls=0.0),
     }
     defaults.update(overrides)
     return ApiFootballConfig(**defaults)
@@ -95,9 +93,7 @@ class TestCacheLogic:
         config = _make_config(tmp_path)
 
         # Pre-populate cache
-        cache_file = (
-            tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
-        )
+        cache_file = tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         with cache_file.open("w", encoding="utf-8") as f:
             json.dump(fixture, f)
@@ -114,9 +110,7 @@ class TestCacheLogic:
         config = _make_config(tmp_path, cache_ttl_hours=1)
 
         # Pre-populate with old mtime
-        cache_file = (
-            tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
-        )
+        cache_file = tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         with cache_file.open("w", encoding="utf-8") as f:
             json.dump(fixture, f)
@@ -138,9 +132,7 @@ class TestCacheLogic:
         loader = APIFootballLoader(config, "test-key", client=client)
         loader._make_request("players", {"league": 140, "page": 1, "season": 2024})
 
-        cache_file = (
-            tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
-        )
+        cache_file = tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
         assert cache_file.exists()
         with cache_file.open(encoding="utf-8") as f:
             cached = json.load(f)
@@ -151,9 +143,7 @@ class TestCacheLogic:
         config = _make_config(tmp_path)
 
         # Pre-populate cache
-        cache_file = (
-            tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
-        )
+        cache_file = tmp_path / "cache" / "players" / "league_140_page_1_season_2024.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         with cache_file.open("w", encoding="utf-8") as f:
             json.dump(fixture, f)
@@ -181,9 +171,7 @@ class TestRateLimiting:
         fixture = _load_fixture("api_football_players_response.json")
         config = _make_config(
             tmp_path,
-            rate_limit=RateLimitConfig(
-                max_calls_per_day=2, delay_between_calls=0.0
-            ),
+            rate_limit=RateLimitConfig(max_calls_per_day=2, delay_between_calls=0.0),
         )
         client = _mock_client([fixture, fixture, fixture])
         loader = APIFootballLoader(config, "test-key", client=client)
@@ -324,6 +312,73 @@ class TestPlayerExtraction:
         # Invalid player_id=-1 (ge=1 constraint) → rejected
         assert len(players) == 0
         assert len(stats) == 0
+
+    def test_ingest_players_per_team_two_calls(self, tmp_path: Path) -> None:
+        """ingest_players(team_ids=...) makes one paginated call per team."""
+        fixture = _load_fixture("api_football_players_response.json")
+        team1_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+        team2_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+
+        client = _mock_client([team1_resp, team2_resp])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players(team_ids=[529, 541])
+
+        # 2 unique player profiles (deduped by player_id across teams)
+        assert len(players) == 2
+        # 2 stats per team × 2 teams = 4 stat rows (player×team granularity)
+        assert len(stats) == 4
+        assert client.get.call_count == 2
+
+    def test_ingest_players_per_team_keeps_stats_per_team(self, tmp_path: Path) -> None:
+        """A transferred player produces one profile but one stat row per team."""
+        fixture = _load_fixture("api_football_players_response.json")
+        team1_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+        # Team 541 returns only player 1100 with team-541 stats
+        team2_item = {
+            "player": fixture["response"][0]["player"],
+            "statistics": [
+                {
+                    **fixture["response"][0]["statistics"][0],
+                    "team": {
+                        "id": 541,
+                        "name": "Real Madrid",
+                        "logo": "https://media.api-sports.io/football/teams/541.png",
+                    },
+                }
+            ],
+        }
+        team2_resp = {
+            **fixture,
+            "results": 1,
+            "paging": {"current": 1, "total": 1},
+            "response": [team2_item],
+        }
+
+        client = _mock_client([team1_resp, team2_resp])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players(team_ids=[529, 541])
+
+        # Player 1100 appears in both teams → 1 profile, 2 separate stat rows
+        assert len([p for p in players if p.player_id == 1100]) == 1
+        player_1100_stats = [s for s in stats if s.player_id == 1100]
+        assert len(player_1100_stats) == 2  # team 529 + team 541
+        assert {s.team_id for s in player_1100_stats} == {529, 541}
+
+    def test_ingest_players_league_fallback(self, tmp_path: Path) -> None:
+        """ingest_players() without team_ids falls back to league-level pagination."""
+        fixture = _load_fixture("api_football_players_response.json")
+        client = _mock_client([fixture])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players()
+
+        assert len(players) == 2
+        assert client.get.call_count == 1
 
 
 # ─────────────────────────────────────────────────────────────
@@ -538,23 +593,34 @@ class TestIngestAll:
     """Tests for the ``ingest_all`` orchestration method."""
 
     def test_ingest_all_runs_configured_endpoints(self, tmp_path: Path) -> None:
+        teams_resp = _load_fixture("api_football_teams_response.json")
         players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
         transfers_resp = _load_fixture("api_football_transfers_response.json")
 
-        client = _mock_client([players_resp, injuries_resp, transfers_resp])
+        # Call order: teams (1) → players for team 529 (1) → players for team 541 (1)
+        #             → injuries (1) → transfers for team 529 (1) → transfers for team 541 (1)
+        players_page = {**players_resp, "paging": {"current": 1, "total": 1}}
+        client = _mock_client(
+            [
+                teams_resp,  # fetch_team_ids → [529, 541]
+                players_page,  # players for team 529
+                players_page,  # players for team 541
+                injuries_resp,  # injuries
+                transfers_resp,  # transfers for team 529
+                transfers_resp,  # transfers for team 541
+            ]
+        )
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
         out_dir = tmp_path / "raw"
-        counts = loader.ingest_all(
-            output_dir=out_dir, team_ids=[529]
-        )
+        counts = loader.ingest_all(output_dir=out_dir)
 
-        assert counts["players"] == 2
-        assert counts["player_stats"] == 2
+        assert counts["players"] == 2  # 2 unique profiles (deduped by player_id)
+        assert counts["player_stats"] == 4  # 2 players × 2 teams
         assert counts["injuries"] == 2
-        assert counts["transfers"] == 2
+        assert counts["transfers"] == 4  # 2 per team × 2 teams
 
         assert (out_dir / "players.parquet").exists()
         assert (out_dir / "player_stats.parquet").exists()
@@ -564,34 +630,103 @@ class TestIngestAll:
     def test_ingest_all_logs_summary(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        teams_resp = _load_fixture("api_football_teams_response.json")
         players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
         transfers_resp = _load_fixture("api_football_transfers_response.json")
 
-        client = _mock_client([players_resp, injuries_resp, transfers_resp])
+        players_page = {**players_resp, "paging": {"current": 1, "total": 1}}
+        client = _mock_client(
+            [
+                teams_resp,
+                players_page,
+                players_page,
+                injuries_resp,
+                transfers_resp,
+                transfers_resp,
+            ]
+        )
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
         with caplog.at_level("INFO"):
-            loader.ingest_all(output_dir=tmp_path / "raw", team_ids=[529])
+            loader.ingest_all(output_dir=tmp_path / "raw")
 
         assert "Ingest complete" in caplog.text
 
-    def test_ingest_all_warns_missing_team_ids(
+    def test_ingest_all_injuries_only_no_team_fetch(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
 
-        client = _mock_client([players_resp, injuries_resp])
+        client = _mock_client([injuries_resp])
+        config = _make_config(tmp_path, endpoints=("injuries",))
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        counts = loader.ingest_all(output_dir=tmp_path / "raw")
+
+        assert counts["injuries"] == 2
+        assert "players" not in counts
+        # Only 1 call (injuries), no teams call
+        assert client.get.call_count == 1
+
+
+# ─────────────────────────────────────────────────────────────
+# Team IDs
+# ─────────────────────────────────────────────────────────────
+
+
+class TestFetchTeamIds:
+    """Tests for fetch_team_ids — single-call team discovery."""
+
+    def test_fetch_team_ids_returns_sorted_ids(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        client = _mock_client([fixture])
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
-        with caplog.at_level("WARNING"):
-            counts = loader.ingest_all(output_dir=tmp_path / "raw")
+        with caplog.at_level("INFO"):
+            team_ids = loader.fetch_team_ids()
 
-        assert "transfers" not in counts
-        assert "no team_ids provided" in caplog.text
+        assert team_ids == [529, 541]
+        client.get.assert_called_once()
+        assert "Fetched 2 team IDs" in caplog.text
+
+    def test_fetch_team_ids_uses_cache(self, tmp_path: Path) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        config = _make_config(tmp_path)
+
+        # Pre-populate cache
+        cache_file = tmp_path / "cache" / "teams" / "league_140_season_2024.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        with cache_file.open("w", encoding="utf-8") as f:
+            json.dump(fixture, f)
+
+        client = _mock_client([])
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        team_ids = loader.fetch_team_ids()
+
+        assert team_ids == [529, 541]
+        client.get.assert_not_called()
+
+    def test_fetch_team_ids_empty_response_raises(self, tmp_path: Path) -> None:
+        empty_response = {
+            "get": "teams",
+            "parameters": {"league": "140", "season": "2024"},
+            "errors": [],
+            "results": 0,
+            "paging": {"current": 1, "total": 1},
+            "response": [],
+        }
+        client = _mock_client([empty_response])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        with pytest.raises(APIFootballError, match="No teams found"):
+            loader.fetch_team_ids()
 
 
 # ─────────────────────────────────────────────────────────────

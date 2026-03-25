@@ -165,9 +165,7 @@ def build_shots_table(engine: Engine, season: str) -> pd.DataFrame:
         params={"season": season},
     )
 
-    shots_df["zone"] = shots_df.apply(
-        lambda r: _assign_zone(r["x"], r["y"]), axis=1
-    )
+    shots_df["zone"] = shots_df.apply(lambda r: _assign_zone(r["x"], r["y"]), axis=1)
 
     logger.info("Shots loaded for season %s: %d rows", season, len(shots_df))
     return shots_df

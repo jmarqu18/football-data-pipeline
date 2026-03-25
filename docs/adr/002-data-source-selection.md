@@ -37,6 +37,16 @@ Las **2 fuentes** seleccionadas para el pipeline son:
 
 Se descartan FBref (solapamiento con API-Football, menor fiabilidad de acceso), Transfermarkt, FotMob y WhoScored por incompatibilidad ética o legal con un proyecto público.
 
+### Limitación del free tier de API-Football (descubierta en pruebas e2e)
+
+Durante las pruebas end-to-end (marzo 2026) se identificaron dos restricciones del free tier no documentadas previamente:
+
+1. **Paginación limitada a página 3:** el endpoint `/players?league=140&season=2024` devuelve un error `"Free plans are limited to a maximum value of 3 for the Page parameter"` al solicitar `page=4`. Con 20 jugadores por página, esto limita a **60 jugadores máximo** — insuficiente para una liga completa (~500-700 jugadores).
+
+2. **Temporadas limitadas:** solo disponibles las temporadas 2022-2024.
+
+**Workaround implementado:** se cambió la estrategia de ingesta de per-league a per-team. Cada equipo se consulta por separado (`/players?team={id}&season=2024`), donde cada equipo cabe en 1-2 páginas (~25-35 jugadores). El límite de 3 páginas aplica por query, no globalmente. Resultado: ~40 calls para players, ~63 calls totales — dentro del budget de 100 calls/día.
+
 ## Consequences
 
 **Positivas:**
@@ -49,7 +59,7 @@ Se descartan FBref (solapamiento con API-Football, menor fiabilidad de acceso), 
 **Negativas:**
 
 - No se dispone de valores de mercado (Transfermarkt) ni ratings compuestos (WhoScored).
-- API-Football free tier limita a 100 calls/día, requiriendo cache agresivo y config de scope.
+- API-Football free tier limita paginación a 3 páginas por query y temporadas a 2022-2024. Mitigado con estrategia per-team que recupera todos los jugadores dentro del budget de 100 calls/día.
 
 **Mitigación:**
 

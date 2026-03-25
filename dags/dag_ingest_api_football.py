@@ -1,10 +1,16 @@
 """Airflow DAG for ingesting API-Football data into the RAW layer.
 
-Tasks (sequential to respect the 100 calls/day free tier limit):
-    1. ingest_players   — players + season stats → Parquet; returns team_ids via XCom.
-    2. ingest_injuries  — injury records → Parquet.
-    3. ingest_transfers — transfer records for each team → Parquet.
-    4. ingest_standings — league standings (1 API call) → Parquet (independent).
+Tasks:
+    1. fetch_teams       — 1 API call → returns team_ids via XCom.
+    2. ingest_players    — per-team pagination (~40 calls) → Parquet.
+    3. ingest_injuries   — injury records → Parquet (independent of teams).
+    4. ingest_transfers  — transfer records per team → Parquet.
+    5. ingest_standings  — league standings (1 API call) → Parquet (independent).
+
+Free-tier workaround:
+    The ``/players`` endpoint limits free plans to page ≤ 3 per query.
+    By querying per team (``?team={id}&season=2024``), each team fits in
+    1-2 pages (~25-35 players), recovering all ~500-700 players.
 """
 
 from __future__ import annotations
@@ -34,21 +40,30 @@ def ingest_api_football() -> None:
     """Ingest API-Football players, injuries, and transfers into RAW Parquet files."""
 
     @task
-    def ingest_players_task() -> list[int]:
-        """Fetch players and season stats; return unique team_ids for the transfers task."""
+    def fetch_teams_task() -> list[int]:
+        """Discover all team IDs for the configured league (1 API call)."""
         cfg = get_config().sources.api_football
         api_key = os.environ["API_FOOTBALL_KEY"]
 
         with APIFootballLoader(config=cfg, api_key=api_key) as loader:
-            players, stats = loader.ingest_players()
+            team_ids = loader.fetch_team_ids()
+
+        logger.info("Discovered %d teams", len(team_ids))
+        return team_ids
+
+    @task
+    def ingest_players_task(team_ids: list[int]) -> None:
+        """Fetch players and season stats per team; save to Parquet."""
+        cfg = get_config().sources.api_football
+        api_key = os.environ["API_FOOTBALL_KEY"]
+
+        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
+            players, stats = loader.ingest_players(team_ids=team_ids)
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
         APIFootballLoader.save_parquet(players, _RAW_DIR / "players.parquet")
         APIFootballLoader.save_parquet(stats, _RAW_DIR / "player_stats.parquet")
-
-        team_ids = sorted({s.team_id for s in stats})
-        logger.info("Players ingested. Unique teams: %d", len(team_ids))
-        return team_ids
+        logger.info("Players ingested: %d players, %d stats", len(players), len(stats))
 
     @task
     def ingest_injuries_task() -> None:
@@ -65,7 +80,7 @@ def ingest_api_football() -> None:
 
     @task
     def ingest_transfers_task(team_ids: list[int]) -> None:
-        """Fetch transfer records for each team extracted in the players task."""
+        """Fetch transfer records for each team."""
         cfg = get_config().sources.api_football
         api_key = os.environ["API_FOOTBALL_KEY"]
 
@@ -90,13 +105,16 @@ def ingest_api_football() -> None:
         logger.info("Standings ingested: %d records", len(standings))
         return len(standings)
 
-    # Sequential chain: players → injuries → transfers.
-    # Injuries has no data dependency on players, but the explicit ordering avoids
-    # simultaneous API calls on the 100 calls/day free tier.
-    # Standings runs independently (separate 1-call endpoint).
-    team_ids = ingest_players_task()
+    # Task graph:
+    #   fetch_teams ──→ ingest_players ──→ ingest_injuries ──→ ingest_transfers
+    #                                                          (uses team_ids from fetch_teams)
+    # Injuries has no data dependency on teams but is sequenced between
+    # players and transfers to spread API calls and respect rate limits.
+    # Standings runs independently (1 call).
+    team_ids = fetch_teams_task()
+    players = ingest_players_task(team_ids)
     injuries = ingest_injuries_task()
-    team_ids >> injuries >> ingest_transfers_task(team_ids)
+    players >> injuries >> ingest_transfers_task(team_ids)
     ingest_standings_task()
 
 

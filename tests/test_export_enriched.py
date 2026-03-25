@@ -46,7 +46,8 @@ def _make_enriched_engine():
     """Create an in-memory SQLite engine with minimal CLEAN tables."""
     engine = create_engine("sqlite:///:memory:")
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE players (
                 player_id INTEGER PRIMARY KEY,
                 canonical_name TEXT,
@@ -58,22 +59,28 @@ def _make_enriched_engine():
                 birth_date TEXT,
                 nationality TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE teams (
                 team_id INTEGER PRIMARY KEY,
                 canonical_name TEXT,
                 logo_url TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE player_profile (
                 player_id INTEGER PRIMARY KEY,
                 height_cm INTEGER,
                 weight_kg INTEGER
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE player_shots (
                 shot_id INTEGER PRIMARY KEY,
                 player_id INTEGER,
@@ -87,67 +94,76 @@ def _make_enriched_engine():
                 situation TEXT,
                 body_part TEXT
             )
-        """))
-        conn.execute(text(
-            "INSERT INTO players VALUES (1, 'Pedri',"
-            " 'https://photo.url/pedri.jpg', 0.95, 'fuzzy',"
-            " 101, 201, '2002-11-25', 'Spanish')"
-        ))
-        conn.execute(text(
-            "INSERT INTO teams VALUES (3, 'FC Barcelona', 'https://logo.url/barca.png')"
-        ))
+        """)
+        )
+        conn.execute(
+            text(
+                "INSERT INTO players VALUES (1, 'Pedri',"
+                " 'https://photo.url/pedri.jpg', 0.95, 'fuzzy',"
+                " 101, 201, '2002-11-25', 'Spanish')"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO teams VALUES (3, 'FC Barcelona', 'https://logo.url/barca.png')")
+        )
         conn.execute(text("INSERT INTO player_profile VALUES (1, 174, 68)"))
-        conn.execute(text(
-            "INSERT INTO player_shots VALUES"
-            " (1, 1, 3, '2024/2025', 65, 'Goal', 0.90, 0.50, 0.35, 'OpenPlay', 'Right Foot')"
-        ))
+        conn.execute(
+            text(
+                "INSERT INTO player_shots VALUES"
+                " (1, 1, 3, '2024/2025', 65, 'Goal', 0.90, 0.50, 0.35, 'OpenPlay', 'Right Foot')"
+            )
+        )
     return engine
 
 
 def _make_features_parquet(tmp_path, season: str = "2024/2025") -> object:
     """Write a minimal player_season_features.parquet to tmp_path."""
     features_path = tmp_path / "player_season_features.parquet"
-    df = pd.DataFrame([{
-        "player_id": 1,
-        "canonical_name": "Pedri",
-        "known_name": "Pedri",
-        "season": season,
-        "team_id": 3,
-        "position": "Midfielder",
-        "minutes": 2700,
-        "appearances": 30,
-        "starts": 28,
-        "minutes_pct": 0.789,
-        "games_started_pct": 0.933,
-        "goals_per_90": 0.17,
-        "assists_per_90": 0.27,
-        "shots_per_90": 1.67,
-        "key_passes_per_90": 1.5,
-        "tackles_per_90": 0.83,
-        "shots_on_target_pct": 0.4,
-        "dribble_success_rate": 0.65,
-        "duels_won_pct": 0.52,
-        "xg_overperformance": 0.5,
-        "npxg_per_90": 0.14,
-        "xa_per_90": 0.23,
-        "xg_chain_share": 0.12,
-        "xg_buildup_per_90": 0.38,
-        "xg_per_shot": 0.12,
-        "avg_shot_distance": 18.5,
-        "shot_conversion_rate": 0.10,
-        "open_play_shot_pct": 0.8,
-        "headed_shot_pct": 0.1,
-        "injury_count": 1,
-        "transfer_count": 0,
-        "days_since_last_injury": 120,
-        "pct_goals_per_90": 75.0,
-        "pct_assists_per_90": 82.0,
-        "pct_xg_overperformance": 68.0,
-        "pct_npxg_per_90": 72.0,
-        "pct_xg_per_shot": 60.0,
-        "pct_shot_conversion_rate": 55.0,
-        "pct_tackles_per_90": 40.0,
-    }])
+    df = pd.DataFrame(
+        [
+            {
+                "player_id": 1,
+                "canonical_name": "Pedri",
+                "known_name": "Pedri",
+                "season": season,
+                "team_id": 3,
+                "position": "Midfielder",
+                "minutes": 2700,
+                "appearances": 30,
+                "starts": 28,
+                "minutes_pct": 0.789,
+                "games_started_pct": 0.933,
+                "goals_per_90": 0.17,
+                "assists_per_90": 0.27,
+                "shots_per_90": 1.67,
+                "key_passes_per_90": 1.5,
+                "tackles_per_90": 0.83,
+                "shots_on_target_pct": 0.4,
+                "dribble_success_rate": 0.65,
+                "duels_won_pct": 0.52,
+                "xg_overperformance": 0.5,
+                "npxg_per_90": 0.14,
+                "xa_per_90": 0.23,
+                "xg_chain_share": 0.12,
+                "xg_buildup_per_90": 0.38,
+                "xg_per_shot": 0.12,
+                "avg_shot_distance": 18.5,
+                "shot_conversion_rate": 0.10,
+                "open_play_shot_pct": 0.8,
+                "headed_shot_pct": 0.1,
+                "injury_count": 1,
+                "transfer_count": 0,
+                "days_since_last_injury": 120,
+                "pct_goals_per_90": 75.0,
+                "pct_assists_per_90": 82.0,
+                "pct_xg_overperformance": 68.0,
+                "pct_npxg_per_90": 72.0,
+                "pct_xg_per_shot": 60.0,
+                "pct_shot_conversion_rate": 55.0,
+                "pct_tackles_per_90": 40.0,
+            }
+        ]
+    )
     df.to_parquet(features_path, index=False)
     return features_path
 
@@ -200,8 +216,8 @@ def test_run_export_enriched_writes_tables(tmp_path):
 
     with sqlite3.connect(output_path) as conn:
         tables = {
-            r[0] for r in
-            conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         assert "player_season_stats_flat" in tables
         assert "player_shots" in tables

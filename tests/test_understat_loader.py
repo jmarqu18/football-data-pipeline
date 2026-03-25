@@ -46,9 +46,7 @@ def _mock_client(
 ) -> MagicMock:
     """Create a mock soccerdata Understat client."""
     client = MagicMock()
-    client.read_shot_events.return_value = (
-        shots_df if shots_df is not None else _shots_dataframe()
-    )
+    client.read_shot_events.return_value = shots_df if shots_df is not None else _shots_dataframe()
     client.read_player_season_stats.return_value = (
         season_df if season_df is not None else _season_dataframe()
     )
@@ -93,10 +91,22 @@ class TestShotExtraction:
         row = _load_fixture("understat_shots_dataframe.json")[0]
         extracted = UnderstatLoader._extract_shot(row)
 
-        extra_keys = {"league", "season", "game", "team", "date",
-                      "assist_player", "assist_player_id",
-                      "league_id", "season_id", "game_id", "team_id",
-                      "shot_id", "location_x", "location_y"}
+        extra_keys = {
+            "league",
+            "season",
+            "game",
+            "team",
+            "date",
+            "assist_player",
+            "assist_player_id",
+            "league_id",
+            "season_id",
+            "game_id",
+            "team_id",
+            "shot_id",
+            "location_x",
+            "location_y",
+        }
         assert not extra_keys & set(extracted.keys())
 
     def test_extract_shot_body_part_is_none_when_missing(self):
@@ -155,8 +165,17 @@ class TestPlayerSeasonExtraction:
         row = _load_fixture("understat_season_dataframe.json")[0]
         extracted = UnderstatLoader._extract_player_season(row)
 
-        extra_keys = {"league", "league_id", "season_id", "team_id",
-                      "position", "np_goals", "np_xg", "matches", "player"}
+        extra_keys = {
+            "league",
+            "league_id",
+            "season_id",
+            "team_id",
+            "position",
+            "np_goals",
+            "np_xg",
+            "matches",
+            "player",
+        }
         assert not extra_keys & set(extracted.keys())
 
 

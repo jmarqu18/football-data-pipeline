@@ -159,16 +159,11 @@ class UnderstatLoader:
         try:
             df = self._client.read_player_season_stats()
         except Exception as exc:
-            logger.error(
-                "Failed to fetch player season stats from Understat: %s", exc
-            )
+            logger.error("Failed to fetch player season stats from Understat: %s", exc)
             return []
 
         if df.empty:
-            logger.info(
-                "Player season stats ingested: 0 valid, 0 rejected "
-                "(empty DataFrame)"
-            )
+            logger.info("Player season stats ingested: 0 valid, 0 rejected (empty DataFrame)")
             return []
 
         df = df.reset_index()
@@ -180,14 +175,10 @@ class UnderstatLoader:
         for row in records:
             try:
                 extracted = self._extract_player_season(row)
-                stats.append(
-                    RawUnderstatPlayerSeason.model_validate(extracted)
-                )
+                stats.append(RawUnderstatPlayerSeason.model_validate(extracted))
             except (ValidationError, KeyError) as exc:
                 player_id = row.get("player_id", "unknown")
-                logger.warning(
-                    "Rejected player season %s: %s", player_id, exc
-                )
+                logger.warning("Rejected player season %s: %s", player_id, exc)
                 rejected += 1
 
         logger.info(

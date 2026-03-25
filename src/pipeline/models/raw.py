@@ -294,5 +294,3 @@ class RawUnderstatPlayerSeason(BaseModel):
     key_passes: int = Field(ge=0)
     yellow_cards: int = Field(ge=0)
     red_cards: int = Field(ge=0)
-
-
