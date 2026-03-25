@@ -131,6 +131,7 @@ services:
       - "8001:8001"
     volumes:
       - ./data:/opt/airflow/data
+      - ./datasette:/opt/airflow/datasette:ro
     restart: unless-stopped
 
 # ── Volúmenes ─────────────────────────────────────────────────────────────────
