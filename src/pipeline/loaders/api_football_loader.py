@@ -402,6 +402,43 @@ class APIFootballLoader:
     # Public ingestion methods
     # ─────────────────────────────────────────────────────────
 
+    def fetch_team_ids(self, *, force_refresh: bool = False) -> list[int]:
+        """Fetch all team IDs for the configured league and season.
+
+        Calls ``/teams?league={}&season={}`` (1 API call). Used to drive
+        per-team player pagination on the free tier (3-page limit per query).
+
+        Returns:
+            Sorted list of team IDs.
+
+        Raises:
+            APIFootballError: If the response contains zero teams.
+        """
+        params: dict[str, str | int] = {
+            "league": self._config.league_id,
+            "season": self._config.season,
+        }
+        data = self._make_request("teams", params, force_refresh=force_refresh)
+        raw_teams = data.get("response", [])
+
+        team_ids = sorted(item["team"]["id"] for item in raw_teams)
+
+        if not team_ids:
+            msg = (
+                f"No teams found for league={self._config.league_id} "
+                f"season={self._config.season}"
+            )
+            logger.error(msg)
+            raise APIFootballError(msg)
+
+        logger.info(
+            "Fetched %d team IDs for league %d season %d",
+            len(team_ids),
+            self._config.league_id,
+            self._config.season,
+        )
+        return team_ids
+
     def ingest_players(
         self, *, force_refresh: bool = False
     ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
