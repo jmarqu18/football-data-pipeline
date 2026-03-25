@@ -25,6 +25,13 @@ RUN pip install --no-cache-dir \
     "datasette>=0.65.2,<1.0" \
     "datasette-vega>=0.6"
 
+# ── Pre-warm tls_requests native library ─────────────────────────────────────
+# soccerdata depends on tls_requests, which lazily downloads a platform-specific
+# .so from GitHub on first HTTP request (not on import).  Making a real request
+# here bakes the binary into the image layer so no download occurs at DAG runtime.
+# || true: build succeeds even if the test URL is unreachable on the build host.
+RUN python -c 'import tls_requests; tls_requests.get("https://cloudflare.com", timeout=15)' 2>/dev/null || true
+
 # ── Application code ──────────────────────────────────────────────────────────
 COPY --chown=airflow:root src/       /opt/airflow/src/
 COPY --chown=airflow:root dags/      /opt/airflow/dags/
