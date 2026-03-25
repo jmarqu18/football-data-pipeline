@@ -600,23 +600,32 @@ class TestIngestAll:
     """Tests for the ``ingest_all`` orchestration method."""
 
     def test_ingest_all_runs_configured_endpoints(self, tmp_path: Path) -> None:
+        teams_resp = _load_fixture("api_football_teams_response.json")
         players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
         transfers_resp = _load_fixture("api_football_transfers_response.json")
 
-        client = _mock_client([players_resp, injuries_resp, transfers_resp])
+        # Call order: teams (1) → players for team 529 (1) → players for team 541 (1)
+        #             → injuries (1) → transfers for team 529 (1) → transfers for team 541 (1)
+        players_page = {**players_resp, "paging": {"current": 1, "total": 1}}
+        client = _mock_client([
+            teams_resp,      # fetch_team_ids → [529, 541]
+            players_page,    # players for team 529
+            players_page,    # players for team 541
+            injuries_resp,   # injuries
+            transfers_resp,  # transfers for team 529
+            transfers_resp,  # transfers for team 541
+        ])
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
         out_dir = tmp_path / "raw"
-        counts = loader.ingest_all(
-            output_dir=out_dir, team_ids=[529]
-        )
+        counts = loader.ingest_all(output_dir=out_dir)
 
-        assert counts["players"] == 2
-        assert counts["player_stats"] == 2
+        assert counts["players"] == 2    # 2 unique profiles (deduped by player_id)
+        assert counts["player_stats"] == 4  # 2 players × 2 teams
         assert counts["injuries"] == 2
-        assert counts["transfers"] == 2
+        assert counts["transfers"] == 4  # 2 per team × 2 teams
 
         assert (out_dir / "players.parquet").exists()
         assert (out_dir / "player_stats.parquet").exists()
@@ -626,34 +635,39 @@ class TestIngestAll:
     def test_ingest_all_logs_summary(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        teams_resp = _load_fixture("api_football_teams_response.json")
         players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
         transfers_resp = _load_fixture("api_football_transfers_response.json")
 
-        client = _mock_client([players_resp, injuries_resp, transfers_resp])
+        players_page = {**players_resp, "paging": {"current": 1, "total": 1}}
+        client = _mock_client([
+            teams_resp, players_page, players_page,
+            injuries_resp, transfers_resp, transfers_resp,
+        ])
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
         with caplog.at_level("INFO"):
-            loader.ingest_all(output_dir=tmp_path / "raw", team_ids=[529])
+            loader.ingest_all(output_dir=tmp_path / "raw")
 
         assert "Ingest complete" in caplog.text
 
-    def test_ingest_all_warns_missing_team_ids(
+    def test_ingest_all_injuries_only_no_team_fetch(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
 
-        client = _mock_client([players_resp, injuries_resp])
-        config = _make_config(tmp_path)
+        client = _mock_client([injuries_resp])
+        config = _make_config(tmp_path, endpoints=("injuries",))
         loader = APIFootballLoader(config, "test-key", client=client)
 
-        with caplog.at_level("WARNING"):
-            counts = loader.ingest_all(output_dir=tmp_path / "raw")
+        counts = loader.ingest_all(output_dir=tmp_path / "raw")
 
-        assert "transfers" not in counts
-        assert "no team_ids provided" in caplog.text
+        assert counts["injuries"] == 2
+        assert "players" not in counts
+        # Only 1 call (injuries), no teams call
+        assert client.get.call_count == 1
 
 
 # ─────────────────────────────────────────────────────────────

@@ -781,11 +781,16 @@ class APIFootballLoader:
     ) -> dict[str, int]:
         """Run all configured endpoints and save Parquet files.
 
+        If ``team_ids`` is not provided and either ``players_stats`` or
+        ``transfers`` are in the configured endpoints, calls
+        ``fetch_team_ids()`` first (1 API call) to enable per-team player
+        pagination and transfers.
+
         Args:
             output_dir: Base directory for Parquet output.
                 Defaults to ``data/raw/api_football``.
-            team_ids: Team IDs for the ``/transfers`` endpoint.
-                Required if ``"transfers"`` is in the configured endpoints.
+            team_ids: Team IDs for per-team pagination and transfers.
+                If omitted, auto-discovered via ``/teams`` endpoint.
             force_refresh: If ``True``, skip cache for all requests.
 
         Returns:
@@ -795,8 +800,14 @@ class APIFootballLoader:
         endpoints = self._config.endpoints
         counts: dict[str, int] = {}
 
+        # Auto-discover team IDs if not provided
+        if team_ids is None and ("players_stats" in endpoints or "transfers" in endpoints):
+            team_ids = self.fetch_team_ids(force_refresh=force_refresh)
+
         if "players_stats" in endpoints:
-            players, stats = self.ingest_players(force_refresh=force_refresh)
+            players, stats = self.ingest_players(
+                team_ids=team_ids, force_refresh=force_refresh
+            )
             self.save_parquet(players, out / "players.parquet")
             self.save_parquet(stats, out / "player_stats.parquet")
             counts["players"] = len(players)
