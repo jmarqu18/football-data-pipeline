@@ -44,6 +44,7 @@ from pipeline.models.raw import (
 # Helpers to build fixture objects
 # ─────────────────────────────────────────────────────────────
 
+
 def _make_api_player(
     player_id: int,
     name: str,
@@ -248,24 +249,24 @@ GIRONA = 547
 
 # Expected match pairs: (understat_id, api_football_id)
 _EXPECTED_MATCHES = {
-    (1001, 101),   # Bellingham
-    (1002, 102),   # Lewandowski
-    (1003, 103),   # Vinicius
-    (1004, 104),   # Pedri
-    (1005, 105),   # Rodrygo
-    (1006, 106),   # Lamine Yamal
-    (1007, 107),   # Griezmann
-    (1008, 108),   # Koke (via stats)
-    (1009, 109),   # Oblak
-    (1010, 110),   # Isco (via stats)
-    (1011, 111),   # Joselu
-    (1012, 112),   # Dani Carvajal
-    (1013, 113),   # Transfer Player
-    (1014, 114),   # Sørloth
-    (1015, 115),   # Morata
-    (1018, 118),   # Ferran Torres
-    (1019, 119),   # Iñaki Williams
-    (1020, 120),   # Hugo Duro
+    (1001, 101),  # Bellingham
+    (1002, 102),  # Lewandowski
+    (1003, 103),  # Vinicius
+    (1004, 104),  # Pedri
+    (1005, 105),  # Rodrygo
+    (1006, 106),  # Lamine Yamal
+    (1007, 107),  # Griezmann
+    (1008, 108),  # Koke (via stats)
+    (1009, 109),  # Oblak
+    (1010, 110),  # Isco (via stats)
+    (1011, 111),  # Joselu
+    (1012, 112),  # Dani Carvajal
+    (1013, 113),  # Transfer Player
+    (1014, 114),  # Sørloth
+    (1015, 115),  # Morata
+    (1018, 118),  # Ferran Torres
+    (1019, 119),  # Iñaki Williams
+    (1020, 120),  # Hugo Duro
 }
 
 
@@ -517,9 +518,7 @@ class TestTwentyPlayers:
             twenty_players_fixture["transfers"],
         )
         exact_ids = {
-            p.understat_id
-            for p in result.resolved_players
-            if p.resolution_method == "exact"
+            p.understat_id for p in result.resolved_players if p.resolution_method == "exact"
         }
         # Bellingham, Lewandowski, Griezmann, Oblak should be exact
         for uid in [1001, 1002, 1007, 1009]:

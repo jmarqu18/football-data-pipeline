@@ -63,9 +63,7 @@ def ingest_api_football() -> None:
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
         APIFootballLoader.save_parquet(players, _RAW_DIR / "players.parquet")
         APIFootballLoader.save_parquet(stats, _RAW_DIR / "player_stats.parquet")
-        logger.info(
-            "Players ingested: %d players, %d stats", len(players), len(stats)
-        )
+        logger.info("Players ingested: %d players, %d stats", len(players), len(stats))
 
     @task
     def ingest_injuries_task() -> None:

@@ -41,8 +41,13 @@ def _load_fixture(name: str) -> list[dict]:
 
 # Reusable dicts for building valid sub-models inline.
 _VALID_GAMES = dict(
-    appearances=28, lineups=25, minutes=2100, number=8,
-    position="Midfielder", rating="7.342857", captain=False,
+    appearances=28,
+    lineups=25,
+    minutes=2100,
+    number=8,
+    position="Midfielder",
+    rating="7.342857",
+    captain=False,
 )
 _VALID_SHOTS = dict(total=32, on=14)
 _VALID_GOALS = dict(total=5, conceded=0, assists=7, saves=None)
@@ -55,11 +60,20 @@ _VALID_CARDS = dict(yellow=4, yellowred=0, red=0)
 _VALID_PENALTY = dict(won=None, committed=None, scored=0, missed=0, saved=None)
 
 _VALID_PLAYER_STATS = dict(
-    player_id=1100, team_id=529, team_name="Barcelona",
-    league_id=140, season=2024,
-    games=_VALID_GAMES, shots=_VALID_SHOTS, goals=_VALID_GOALS,
-    passes=_VALID_PASSES, tackles=_VALID_TACKLES, duels=_VALID_DUELS,
-    dribbles=_VALID_DRIBBLES, fouls=_VALID_FOULS, cards=_VALID_CARDS,
+    player_id=1100,
+    team_id=529,
+    team_name="Barcelona",
+    league_id=140,
+    season=2024,
+    games=_VALID_GAMES,
+    shots=_VALID_SHOTS,
+    goals=_VALID_GOALS,
+    passes=_VALID_PASSES,
+    tackles=_VALID_TACKLES,
+    duels=_VALID_DUELS,
+    dribbles=_VALID_DRIBBLES,
+    fouls=_VALID_FOULS,
+    cards=_VALID_CARDS,
     penalty=_VALID_PENALTY,
 )
 
@@ -158,10 +172,15 @@ class TestRawAPIFootballPlayer:
     def test_player_json_roundtrip(self):
         """JSON serialisation round-trip preserves all values."""
         p = RawAPIFootballPlayer(
-            player_id=1100, name="Pedro González López",
-            firstname="Pedro", lastname="González López",
-            age=22, birth_date="2002-11-25", nationality="Spain",
-            height="174 cm", weight="60 kg",
+            player_id=1100,
+            name="Pedro González López",
+            firstname="Pedro",
+            lastname="González López",
+            age=22,
+            birth_date="2002-11-25",
+            nationality="Spain",
+            height="174 cm",
+            weight="60 kg",
         )
         restored = RawAPIFootballPlayer.model_validate_json(p.model_dump_json())
         assert restored == p
@@ -312,10 +331,15 @@ class TestRawAPIFootballInjury:
     def test_valid_injury_all_fields(self):
         """A fully specified injury record is created correctly."""
         inj = RawAPIFootballInjury(
-            player_id=1100, player_name="Pedro González López",
-            team_id=529, team_name="Barcelona",
-            fixture_id=1035042, league_id=140,
-            reason="Knee Injury", type="Missing Fixture", date="2025-01-15",
+            player_id=1100,
+            player_name="Pedro González López",
+            team_id=529,
+            team_name="Barcelona",
+            fixture_id=1035042,
+            league_id=140,
+            reason="Knee Injury",
+            type="Missing Fixture",
+            date="2025-01-15",
         )
         assert inj.player_id == 1100
         assert inj.reason == "Knee Injury"
@@ -339,40 +363,68 @@ class TestRawAPIFootballInjury:
         """reason is required."""
         with pytest.raises(ValidationError):
             RawAPIFootballInjury(
-                player_id=1, player_name="X", team_id=1, team_name="T",
-                league_id=1, type="Missing Fixture", date="2025-01-01",
+                player_id=1,
+                player_name="X",
+                team_id=1,
+                team_name="T",
+                league_id=1,
+                type="Missing Fixture",
+                date="2025-01-01",
             )  # type: ignore[call-arg]
 
     def test_injury_rejects_missing_type(self):
         """type is required."""
         with pytest.raises(ValidationError):
             RawAPIFootballInjury(
-                player_id=1, player_name="X", team_id=1, team_name="T",
-                league_id=1, reason="Knee", date="2025-01-01",
+                player_id=1,
+                player_name="X",
+                team_id=1,
+                team_name="T",
+                league_id=1,
+                reason="Knee",
+                date="2025-01-01",
             )  # type: ignore[call-arg]
 
     def test_injury_rejects_player_id_zero(self):
         """player_id must be >= 1."""
         with pytest.raises(ValidationError):
             RawAPIFootballInjury(
-                player_id=0, player_name="X", team_id=1, team_name="T",
-                league_id=1, reason="Knee", type="Missing Fixture", date="2025-01-01",
+                player_id=0,
+                player_name="X",
+                team_id=1,
+                team_name="T",
+                league_id=1,
+                reason="Knee",
+                type="Missing Fixture",
+                date="2025-01-01",
             )
 
     def test_injury_rejects_extra_fields(self):
         """Extra fields are forbidden."""
         with pytest.raises(ValidationError):
             RawAPIFootballInjury(
-                player_id=1, player_name="X", team_id=1, team_name="T",
-                league_id=1, reason="Knee", type="Missing Fixture",
-                date="2025-01-01", unknown="x",
+                player_id=1,
+                player_name="X",
+                team_id=1,
+                team_name="T",
+                league_id=1,
+                reason="Knee",
+                type="Missing Fixture",
+                date="2025-01-01",
+                unknown="x",
             )
 
     def test_injury_is_frozen(self):
         """Model is immutable after construction."""
         inj = RawAPIFootballInjury(
-            player_id=1, player_name="X", team_id=1, team_name="T",
-            league_id=1, reason="Knee", type="Missing Fixture", date="2025-01-01",
+            player_id=1,
+            player_name="X",
+            team_id=1,
+            team_name="T",
+            league_id=1,
+            reason="Knee",
+            type="Missing Fixture",
+            date="2025-01-01",
         )
         with pytest.raises(ValidationError):
             inj.reason = "Changed"  # type: ignore[misc]
@@ -380,9 +432,15 @@ class TestRawAPIFootballInjury:
     def test_injury_json_roundtrip(self):
         """JSON serialisation round-trip preserves all values."""
         inj = RawAPIFootballInjury(
-            player_id=1100, player_name="Pedri", team_id=529, team_name="Barcelona",
-            fixture_id=1035042, league_id=140,
-            reason="Knee Injury", type="Missing Fixture", date="2025-01-15",
+            player_id=1100,
+            player_name="Pedri",
+            team_id=529,
+            team_name="Barcelona",
+            fixture_id=1035042,
+            league_id=140,
+            reason="Knee Injury",
+            type="Missing Fixture",
+            date="2025-01-15",
         )
         restored = RawAPIFootballInjury.model_validate_json(inj.model_dump_json())
         assert restored == inj
@@ -399,9 +457,14 @@ class TestRawAPIFootballTransfer:
     def test_valid_transfer_all_fields(self):
         """A fully specified transfer is created correctly."""
         t = RawAPIFootballTransfer(
-            player_id=276, player_name="Neymar", date="2017-08-03",
-            team_in_id=85, team_in_name="Paris Saint Germain",
-            team_out_id=529, team_out_name="Barcelona", type="€ 222M",
+            player_id=276,
+            player_name="Neymar",
+            date="2017-08-03",
+            team_in_id=85,
+            team_in_name="Paris Saint Germain",
+            team_out_id=529,
+            team_out_name="Barcelona",
+            type="€ 222M",
         )
         assert t.player_id == 276
         assert t.team_in_name == "Paris Saint Germain"
@@ -453,9 +516,14 @@ class TestRawAPIFootballTransfer:
     def test_transfer_json_roundtrip(self):
         """JSON serialisation round-trip preserves all values."""
         t = RawAPIFootballTransfer(
-            player_id=276, player_name="Neymar", date="2017-08-03",
-            team_in_id=85, team_in_name="PSG",
-            team_out_id=529, team_out_name="Barcelona", type="€ 222M",
+            player_id=276,
+            player_name="Neymar",
+            date="2017-08-03",
+            team_in_id=85,
+            team_in_name="PSG",
+            team_out_id=529,
+            team_out_name="Barcelona",
+            type="€ 222M",
         )
         restored = RawAPIFootballTransfer.model_validate_json(t.model_dump_json())
         assert restored == t
@@ -472,11 +540,23 @@ class TestRawUnderstatPlayerSeason:
     def test_valid_player_season_all_fields(self):
         """A fully populated season record is created correctly."""
         ps = RawUnderstatPlayerSeason(
-            player_id=227, player_name="Robert Lewandowski",
-            team="Barcelona", season="2024/2025",
-            games=30, minutes=2520, goals=19, assists=4,
-            xg=18.53, xa=3.12, npxg=16.08, xg_chain=22.35, xg_buildup=8.72,
-            shots=98, key_passes=25, yellow_cards=3, red_cards=0,
+            player_id=227,
+            player_name="Robert Lewandowski",
+            team="Barcelona",
+            season="2024/2025",
+            games=30,
+            minutes=2520,
+            goals=19,
+            assists=4,
+            xg=18.53,
+            xa=3.12,
+            npxg=16.08,
+            xg_chain=22.35,
+            xg_buildup=8.72,
+            shots=98,
+            key_passes=25,
+            yellow_cards=3,
+            red_cards=0,
         )
         assert ps.player_id == 227
         assert ps.player_name == "Robert Lewandowski"
@@ -494,11 +574,23 @@ class TestRawUnderstatPlayerSeason:
     def test_player_season_xg_above_one_is_valid(self):
         """Season xG can exceed 1.0 (it is a season total, not per-shot)."""
         ps = RawUnderstatPlayerSeason(
-            player_id=1, player_name="Striker",
-            team="Club", season="2024/2025",
-            games=30, minutes=2500, goals=20, assists=5,
-            xg=25.0, xa=8.0, npxg=22.0, xg_chain=30.0, xg_buildup=12.0,
-            shots=120, key_passes=30, yellow_cards=2, red_cards=0,
+            player_id=1,
+            player_name="Striker",
+            team="Club",
+            season="2024/2025",
+            games=30,
+            minutes=2500,
+            goals=20,
+            assists=5,
+            xg=25.0,
+            xa=8.0,
+            npxg=22.0,
+            xg_chain=30.0,
+            xg_buildup=12.0,
+            shots=120,
+            key_passes=30,
+            yellow_cards=2,
+            red_cards=0,
         )
         assert ps.xg == pytest.approx(25.0)
 
@@ -513,90 +605,205 @@ class TestRawUnderstatPlayerSeason:
         """xG cannot be negative."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=1, minutes=90, goals=0, assists=0,
-                xg=-0.1, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=1, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=1,
+                minutes=90,
+                goals=0,
+                assists=0,
+                xg=-0.1,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=1,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )
 
     def test_player_season_rejects_negative_goals(self):
         """goals cannot be negative."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=1, minutes=90, goals=-1, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=1,
+                minutes=90,
+                goals=-1,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )
 
     def test_player_season_rejects_negative_minutes(self):
         """minutes cannot be negative."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=0, minutes=-1, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=0,
+                minutes=-1,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )
 
     def test_player_season_rejects_negative_games(self):
         """games cannot be negative."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=-1, minutes=0, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=-1,
+                minutes=0,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )
 
     def test_player_season_rejects_negative_shots(self):
         """shots cannot be negative."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=0, minutes=0, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=-1, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=0,
+                minutes=0,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=-1,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )
 
     def test_player_season_rejects_missing_player_id(self):
         """player_id is required."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_name="T", team="C", season="2024",
-                games=0, minutes=0, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=0,
+                minutes=0,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )  # type: ignore[call-arg]
 
     def test_player_season_rejects_missing_player_name(self):
         """player_name is required."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, team="C", season="2024",
-                games=0, minutes=0, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                team="C",
+                season="2024",
+                games=0,
+                minutes=0,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
             )  # type: ignore[call-arg]
 
     def test_player_season_rejects_extra_fields(self):
         """Extra fields are forbidden."""
         with pytest.raises(ValidationError):
             RawUnderstatPlayerSeason(
-                player_id=1, player_name="T", team="C", season="2024",
-                games=0, minutes=0, goals=0, assists=0,
-                xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-                shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+                player_id=1,
+                player_name="T",
+                team="C",
+                season="2024",
+                games=0,
+                minutes=0,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
                 unknown="x",
             )
 
     def test_player_season_is_frozen(self):
         """Model is immutable after construction."""
         ps = RawUnderstatPlayerSeason(
-            player_id=1, player_name="T", team="C", season="2024",
-            games=0, minutes=0, goals=0, assists=0,
-            xg=0.0, xa=0.0, npxg=0.0, xg_chain=0.0, xg_buildup=0.0,
-            shots=0, key_passes=0, yellow_cards=0, red_cards=0,
+            player_id=1,
+            player_name="T",
+            team="C",
+            season="2024",
+            games=0,
+            minutes=0,
+            goals=0,
+            assists=0,
+            xg=0.0,
+            xa=0.0,
+            npxg=0.0,
+            xg_chain=0.0,
+            xg_buildup=0.0,
+            shots=0,
+            key_passes=0,
+            yellow_cards=0,
+            red_cards=0,
         )
         with pytest.raises(ValidationError):
             ps.goals = 99  # type: ignore[misc]
@@ -604,11 +811,23 @@ class TestRawUnderstatPlayerSeason:
     def test_player_season_json_roundtrip(self):
         """JSON serialisation round-trip preserves all values."""
         ps = RawUnderstatPlayerSeason(
-            player_id=227, player_name="Robert Lewandowski",
-            team="Barcelona", season="2024/2025",
-            games=30, minutes=2520, goals=19, assists=4,
-            xg=18.53, xa=3.12, npxg=16.08, xg_chain=22.35, xg_buildup=8.72,
-            shots=98, key_passes=25, yellow_cards=3, red_cards=0,
+            player_id=227,
+            player_name="Robert Lewandowski",
+            team="Barcelona",
+            season="2024/2025",
+            games=30,
+            minutes=2520,
+            goals=19,
+            assists=4,
+            xg=18.53,
+            xa=3.12,
+            npxg=16.08,
+            xg_chain=22.35,
+            xg_buildup=8.72,
+            shots=98,
+            key_passes=25,
+            yellow_cards=3,
+            red_cards=0,
         )
         restored = RawUnderstatPlayerSeason.model_validate_json(ps.model_dump_json())
         assert restored == ps
@@ -812,11 +1031,19 @@ class TestRawAPIFootballStandings:
     def test_raw_standings_model(self):
         """A fully specified standings record is created correctly."""
         s = RawAPIFootballStandings(
-            league_id=140, season=2024,
-            team_id=529, team_name="Barcelona",
-            rank=1, points=68,
-            played_total=28, wins=21, draws=5, losses=2,
-            goals_for=72, goals_against=31, goal_diff=41,
+            league_id=140,
+            season=2024,
+            team_id=529,
+            team_name="Barcelona",
+            rank=1,
+            points=68,
+            played_total=28,
+            wins=21,
+            draws=5,
+            losses=2,
+            goals_for=72,
+            goals_against=31,
+            goal_diff=41,
             form="WWWDW",
         )
         assert s.played_total == 28
@@ -825,11 +1052,19 @@ class TestRawAPIFootballStandings:
     def test_standings_form_is_optional(self):
         """form can be None early in the season."""
         s = RawAPIFootballStandings(
-            league_id=140, season=2024,
-            team_id=529, team_name="Barcelona",
-            rank=1, points=0,
-            played_total=0, wins=0, draws=0, losses=0,
-            goals_for=0, goals_against=0, goal_diff=0,
+            league_id=140,
+            season=2024,
+            team_id=529,
+            team_name="Barcelona",
+            rank=1,
+            points=0,
+            played_total=0,
+            wins=0,
+            draws=0,
+            losses=0,
+            goals_for=0,
+            goals_against=0,
+            goal_diff=0,
             form=None,
         )
         assert s.form is None
@@ -837,11 +1072,19 @@ class TestRawAPIFootballStandings:
     def test_standings_goal_diff_can_be_negative(self):
         """goal_diff can be negative (bottom of the table)."""
         s = RawAPIFootballStandings(
-            league_id=140, season=2024,
-            team_id=999, team_name="Relegated FC",
-            rank=20, points=10,
-            played_total=28, wins=2, draws=4, losses=22,
-            goals_for=15, goals_against=65, goal_diff=-50,
+            league_id=140,
+            season=2024,
+            team_id=999,
+            team_name="Relegated FC",
+            rank=20,
+            points=10,
+            played_total=28,
+            wins=2,
+            draws=4,
+            losses=22,
+            goals_for=15,
+            goals_against=65,
+            goal_diff=-50,
             form="LLLLL",
         )
         assert s.goal_diff == -50
@@ -850,22 +1093,38 @@ class TestRawAPIFootballStandings:
         """Extra fields are forbidden."""
         with pytest.raises(ValidationError):
             RawAPIFootballStandings(
-                league_id=140, season=2024,
-                team_id=529, team_name="Barcelona",
-                rank=1, points=68,
-                played_total=28, wins=21, draws=5, losses=2,
-                goals_for=72, goals_against=31, goal_diff=41,
+                league_id=140,
+                season=2024,
+                team_id=529,
+                team_name="Barcelona",
+                rank=1,
+                points=68,
+                played_total=28,
+                wins=21,
+                draws=5,
+                losses=2,
+                goals_for=72,
+                goals_against=31,
+                goal_diff=41,
                 unknown="x",
             )
 
     def test_standings_is_frozen(self):
         """Model is immutable after construction."""
         s = RawAPIFootballStandings(
-            league_id=140, season=2024,
-            team_id=529, team_name="Barcelona",
-            rank=1, points=68,
-            played_total=28, wins=21, draws=5, losses=2,
-            goals_for=72, goals_against=31, goal_diff=41,
+            league_id=140,
+            season=2024,
+            team_id=529,
+            team_name="Barcelona",
+            rank=1,
+            points=68,
+            played_total=28,
+            wins=21,
+            draws=5,
+            losses=2,
+            goals_for=72,
+            goals_against=31,
+            goal_diff=41,
         )
         with pytest.raises(ValidationError):
             s.points = 99  # type: ignore[misc]
@@ -873,11 +1132,19 @@ class TestRawAPIFootballStandings:
     def test_standings_json_roundtrip(self):
         """JSON serialisation round-trip preserves all values."""
         s = RawAPIFootballStandings(
-            league_id=140, season=2024,
-            team_id=529, team_name="Barcelona",
-            rank=1, points=68,
-            played_total=28, wins=21, draws=5, losses=2,
-            goals_for=72, goals_against=31, goal_diff=41,
+            league_id=140,
+            season=2024,
+            team_id=529,
+            team_name="Barcelona",
+            rank=1,
+            points=68,
+            played_total=28,
+            wins=21,
+            draws=5,
+            losses=2,
+            goals_for=72,
+            goals_against=31,
+            goal_diff=41,
             form="WWWDW",
         )
         restored = RawAPIFootballStandings.model_validate_json(s.model_dump_json())

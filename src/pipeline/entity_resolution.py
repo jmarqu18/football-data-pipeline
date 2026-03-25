@@ -466,9 +466,7 @@ def resolve_players(
             and not _has_conflict(all_scores)
         ):
             # Verify transfer history
-            if _check_transfer_history(
-                best_api_id, u_player.team, raw_transfers, resolved_teams
-            ):
+            if _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams):
                 api_p = api_player_map[best_api_id]
                 resolved.append(_make_resolved(api_p, u_player, 0.70, "contextual"))
                 matched_api.add(best_api_id)
@@ -613,37 +611,43 @@ def write_unresolved_report(
 
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "source",
-            "player_id",
-            "player_name",
-            "team",
-            "candidate_name",
-            "candidate_source_id",
-            "fuzzy_score",
-        ])
+        writer.writerow(
+            [
+                "source",
+                "player_id",
+                "player_name",
+                "team",
+                "candidate_name",
+                "candidate_source_id",
+                "fuzzy_score",
+            ]
+        )
         for player in unresolved:
             if player.top_candidates:
                 for candidate in player.top_candidates:
-                    writer.writerow([
+                    writer.writerow(
+                        [
+                            player.source,
+                            player.player_id,
+                            player.player_name,
+                            player.team or "",
+                            candidate.candidate_name,
+                            candidate.candidate_source_id,
+                            f"{candidate.fuzzy_score:.4f}",
+                        ]
+                    )
+            else:
+                writer.writerow(
+                    [
                         player.source,
                         player.player_id,
                         player.player_name,
                         player.team or "",
-                        candidate.candidate_name,
-                        candidate.candidate_source_id,
-                        f"{candidate.fuzzy_score:.4f}",
-                    ])
-            else:
-                writer.writerow([
-                    player.source,
-                    player.player_id,
-                    player.player_name,
-                    player.team or "",
-                    "",
-                    "",
-                    "",
-                ])
+                        "",
+                        "",
+                        "",
+                    ]
+                )
 
     logger.info("Unresolved candidates report written to %s (%d players)", path, len(unresolved))
     return path

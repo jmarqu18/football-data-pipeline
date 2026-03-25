@@ -227,13 +227,9 @@ class APIFootballLoader:
         if remaining is not None:
             remaining_int = int(remaining)
             if remaining_int < 20:
-                logger.warning(
-                    "API rate limit: %d calls remaining today", remaining_int
-                )
+                logger.warning("API rate limit: %d calls remaining today", remaining_int)
             else:
-                logger.debug(
-                    "API rate limit: %d calls remaining today", remaining_int
-                )
+                logger.debug("API rate limit: %d calls remaining today", remaining_int)
 
         paging = data.get("paging", {})
         results = data.get("results", 0)
@@ -267,16 +263,12 @@ class APIFootballLoader:
         while True:
             page_params = {**params, "page": page}
             try:
-                data = self._make_request(
-                    endpoint, page_params, force_refresh=force_refresh
-                )
+                data = self._make_request(endpoint, page_params, force_refresh=force_refresh)
             except APIFootballError as exc:
                 if page > 1:
                     # Free plan limits pagination (e.g. max 3 pages). Return
                     # whatever we have collected so far rather than crashing.
-                    logger.warning(
-                        "Stopping pagination at page %d for %s: %s", page, endpoint, exc
-                    )
+                    logger.warning("Stopping pagination at page %d for %s: %s", page, endpoint, exc)
                     break
                 raise
             all_items.extend(data.get("response", []))
@@ -380,9 +372,7 @@ class APIFootballLoader:
         }
 
     @staticmethod
-    def _extract_transfer(
-        player_id: int, player_name: str, transfer: dict
-    ) -> dict:
+    def _extract_transfer(player_id: int, player_name: str, transfer: dict) -> dict:
         """Flatten one transfer entry into a ``RawAPIFootballTransfer`` dict."""
         teams = transfer.get("teams") or {}
         team_in = teams.get("in") or {}
@@ -430,10 +420,7 @@ class APIFootballLoader:
         team_ids = sorted(team_ids_list)
 
         if not team_ids:
-            msg = (
-                f"No teams found for league={self._config.league_id} "
-                f"season={self._config.season}"
-            )
+            msg = f"No teams found for league={self._config.league_id} season={self._config.season}"
             logger.error(msg)
             raise APIFootballError(msg)
 
@@ -467,17 +454,13 @@ class APIFootballLoader:
             Tuple of (validated players, validated player stats).
         """
         if team_ids:
-            raw_items = self._fetch_players_per_team(
-                team_ids, force_refresh=force_refresh
-            )
+            raw_items = self._fetch_players_per_team(team_ids, force_refresh=force_refresh)
         else:
             params: dict[str, str | int] = {
                 "league": self._config.league_id,
                 "season": self._config.season,
             }
-            raw_items = self._paginate(
-                "players", params, force_refresh=force_refresh
-            )
+            raw_items = self._paginate("players", params, force_refresh=force_refresh)
 
         return self._parse_player_items(raw_items)
 
@@ -511,9 +494,7 @@ class APIFootballLoader:
                 "season": self._config.season,
                 "team": team_id,
             }
-            team_items = self._paginate(
-                "players", params, force_refresh=force_refresh
-            )
+            team_items = self._paginate("players", params, force_refresh=force_refresh)
             all_items.extend(team_items)
 
         logger.info(
@@ -559,12 +540,8 @@ class APIFootballLoader:
             # One stat row per (player_id, team_id) — keep all entries
             for stat_entry in item.get("statistics", []):
                 try:
-                    stat_dict = self._extract_player_stats(
-                        player_dict["player_id"], stat_entry
-                    )
-                    stats.append(
-                        RawAPIFootballPlayerStats.model_validate(stat_dict)
-                    )
+                    stat_dict = self._extract_player_stats(player_dict["player_id"], stat_entry)
+                    stats.append(RawAPIFootballPlayerStats.model_validate(stat_dict))
                 except (ValidationError, KeyError) as exc:
                     logger.warning(
                         "Rejected stats for player %s: %s",
@@ -574,8 +551,7 @@ class APIFootballLoader:
                     rejected += 1
 
         logger.info(
-            "Players ingested: %d profiles, %d stat rows, %d rejected, "
-            "%d API calls, %d from cache",
+            "Players ingested: %d profiles, %d stat rows, %d rejected, %d API calls, %d from cache",
             len(players),
             len(stats),
             rejected,
@@ -584,9 +560,7 @@ class APIFootballLoader:
         )
         return players, stats
 
-    def ingest_injuries(
-        self, *, force_refresh: bool = False
-    ) -> list[RawAPIFootballInjury]:
+    def ingest_injuries(self, *, force_refresh: bool = False) -> list[RawAPIFootballInjury]:
         """Ingest injury records from ``/injuries``.
 
         Returns:
@@ -606,17 +580,14 @@ class APIFootballLoader:
         for item in raw_items:
             try:
                 injury_dict = self._extract_injury(item)
-                injuries.append(
-                    RawAPIFootballInjury.model_validate(injury_dict)
-                )
+                injuries.append(RawAPIFootballInjury.model_validate(injury_dict))
             except (ValidationError, KeyError) as exc:
                 player_id = item.get("player", {}).get("id", "unknown")
                 logger.warning("Rejected injury for player %s: %s", player_id, exc)
                 rejected += 1
 
         logger.info(
-            "Injuries ingested: %d valid, %d rejected, "
-            "%d API calls, %d from cache",
+            "Injuries ingested: %d valid, %d rejected, %d API calls, %d from cache",
             len(injuries),
             rejected,
             self._calls_made,
@@ -656,12 +627,8 @@ class APIFootballLoader:
                 player_name = player_entry["player"]["name"]
                 for transfer in player_entry.get("transfers", []):
                     try:
-                        transfer_dict = self._extract_transfer(
-                            player_id, player_name, transfer
-                        )
-                        transfers.append(
-                            RawAPIFootballTransfer.model_validate(transfer_dict)
-                        )
+                        transfer_dict = self._extract_transfer(player_id, player_name, transfer)
+                        transfers.append(RawAPIFootballTransfer.model_validate(transfer_dict))
                     except (ValidationError, KeyError) as exc:
                         logger.warning(
                             "Rejected transfer for player %s: %s",
@@ -671,8 +638,7 @@ class APIFootballLoader:
                         rejected += 1
 
         logger.info(
-            "Transfers ingested: %d valid, %d rejected, "
-            "%d API calls, %d from cache",
+            "Transfers ingested: %d valid, %d rejected, %d API calls, %d from cache",
             len(transfers),
             rejected,
             self._calls_made,
@@ -805,9 +771,7 @@ class APIFootballLoader:
             team_ids = self.fetch_team_ids(force_refresh=force_refresh)
 
         if "players_stats" in endpoints:
-            players, stats = self.ingest_players(
-                team_ids=team_ids, force_refresh=force_refresh
-            )
+            players, stats = self.ingest_players(team_ids=team_ids, force_refresh=force_refresh)
             self.save_parquet(players, out / "players.parquet")
             self.save_parquet(stats, out / "player_stats.parquet")
             counts["players"] = len(players)
@@ -820,13 +784,9 @@ class APIFootballLoader:
 
         if "transfers" in endpoints:
             if not team_ids:
-                logger.warning(
-                    "Transfers endpoint configured but no team_ids provided"
-                )
+                logger.warning("Transfers endpoint configured but no team_ids provided")
             else:
-                transfers = self.ingest_transfers(
-                    team_ids, force_refresh=force_refresh
-                )
+                transfers = self.ingest_transfers(team_ids, force_refresh=force_refresh)
                 self.save_parquet(transfers, out / "transfers.parquet")
                 counts["transfers"] = len(transfers)
 

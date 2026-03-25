@@ -182,9 +182,7 @@ def load_config(path: Path) -> IngestionConfig:
     try:
         config = IngestionConfig.model_validate(data)
     except ValidationError as exc:
-        raise ConfigurationError(
-            f"Invalid configuration in {path}:\n{exc}"
-        ) from exc
+        raise ConfigurationError(f"Invalid configuration in {path}:\n{exc}") from exc
 
     logger.info(
         "Configuration loaded: league_id=%d season=%d endpoints=%s",
