@@ -405,8 +405,15 @@ def insert_player_shots(
     us_player_map: dict[int, int],
     season: str,
     league_id: int | None = None,
+    us_player_team_map: dict[int, int | None] | None = None,
 ) -> int:
-    """Insert Understat shot-level data. Returns count of inserted rows."""
+    """Insert Understat shot-level data. Returns count of inserted rows.
+
+    Args:
+        us_player_team_map: Optional mapping of understat player_id → SERIAL team_id.
+            When provided, populates the ``team_id`` column on each shot row.
+    """
+    team_map = us_player_team_map or {}
     inserted = 0
     with engine.begin() as conn:
         for shot in shots:
@@ -422,13 +429,14 @@ def insert_player_shots(
             conn.execute(
                 text(
                     "INSERT INTO player_shots "
-                    "(player_id, season, league_id, understat_id, minute, result, "
+                    "(player_id, team_id, season, league_id, understat_id, minute, result, "
                     "x, y, xg, situation, body_part) "
-                    "VALUES (:pid, :season, :lid, :uid, :minute, :result, "
+                    "VALUES (:pid, :tid, :season, :lid, :uid, :minute, :result, "
                     ":x, :y, :xg, :situation, :body_part)"
                 ),
                 {
                     "pid": pid,
+                    "tid": team_map.get(shot.player_id),
                     "season": season,
                     "lid": league_id,
                     "uid": shot.id,
@@ -648,12 +656,20 @@ def run_transform_clean(
     counts["player_season_advanced"] = insert_player_season_advanced(
         engine, player_season, us_player_map, team_id_map, season_str
     )
+    # Build understat_player_id → SERIAL team_id for shot-level inserts.
+    # player_season has one row per player with their team (Understat name).
+    us_player_team_map: dict[int, int | None] = {}
+    for up in player_season:
+        api_id = _understat_team_to_api_id.get(up.team)
+        us_player_team_map[up.player_id] = team_id_map.get(api_id) if api_id else None
+
     counts["player_shots"] = insert_player_shots(
         engine,
         shots,
         us_player_map,
         season_str,
         league_id=stats[0].league_id if stats else None,
+        us_player_team_map=us_player_team_map,
     )
     counts["player_profile"] = insert_player_profile(engine, players, af_player_map)
     counts["player_injuries"] = insert_player_injuries(engine, injuries, af_player_map, team_id_map)

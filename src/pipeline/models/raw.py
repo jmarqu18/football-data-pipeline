@@ -262,7 +262,7 @@ class RawUnderstatShot(BaseModel):
     xg: float = Field(ge=0.0, le=1.0)
     player: str
     player_id: int
-    situation: str
+    situation: str | None = None
     body_part: str | None = None
 
 

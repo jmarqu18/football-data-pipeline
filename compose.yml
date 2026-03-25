@@ -6,7 +6,6 @@ x-airflow-common:
   &airflow-common
   build: .
   environment:
-    &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
@@ -27,6 +26,9 @@ x-airflow-common:
     DATABASE_URL: postgresql+psycopg2://airflow:airflow@postgres:5432/football
   volumes:
     - ./data:/opt/airflow/data
+    - ./src:/opt/airflow/src
+    - ./dags:/opt/airflow/dags
+    - ./config:/opt/airflow/config
   depends_on:
     postgres:
       condition: service_healthy
@@ -131,6 +133,7 @@ services:
       - "8001:8001"
     volumes:
       - ./data:/opt/airflow/data
+      - ./datasette:/opt/airflow/datasette:ro
     restart: unless-stopped
 
 # ── Volúmenes ─────────────────────────────────────────────────────────────────

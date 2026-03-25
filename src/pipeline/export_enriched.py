@@ -157,7 +157,7 @@ def build_shots_table(engine: Engine, season: str) -> pd.DataFrame:
                 ps.body_part
             FROM player_shots ps
             JOIN players pl ON ps.player_id = pl.player_id
-            JOIN teams t ON ps.team_id = t.team_id
+            LEFT JOIN teams t ON ps.team_id = t.team_id
             WHERE ps.season = :season
             """
         ),

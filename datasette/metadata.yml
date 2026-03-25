@@ -9,12 +9,10 @@ databases:
     tables:
       player_season_stats_flat:
         description: "Vista plana por jugador/temporada con todas las métricas: per-90, xG, calidad de tiro, scouting y percentiles por posición."
-        sort: xg_overperformance
-        sort_desc: true
+        sort_desc: xg_overperformance
       player_shots:
         description: "Tiros individuales con coordenadas normalizadas (Understat) y zona táctica según el modelo Juego de Posición."
-        sort: xg
-        sort_desc: true
+        sort_desc: xg
 
     queries:
       top_xg_overperformance:

@@ -52,8 +52,26 @@ class UnderstatLoader:
     # ─────────────────────────────────────────────────────────
 
     @staticmethod
+    def _nan_to_none(value: object) -> object:
+        """Convert pandas NaN (float) to None; leave everything else unchanged.
+
+        pandas ``to_dict("records")`` emits ``float('nan')`` for missing cells.
+        Pydantic v2 rejects NaN when the expected type is ``str | None``,
+        so we normalise it to ``None`` before validation.
+        """
+        try:
+            import math
+
+            if isinstance(value, float) and math.isnan(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return value
+
+    @staticmethod
     def _extract_shot(row: dict) -> dict:
         """Map a soccerdata shot-event row to RawUnderstatShot fields."""
+        nan = UnderstatLoader._nan_to_none
         return {
             "id": row["shot_id"],
             "minute": row["minute"],
@@ -63,8 +81,8 @@ class UnderstatLoader:
             "xg": row["xg"],
             "player": row["player"],
             "player_id": row["player_id"],
-            "situation": row["situation"],
-            "body_part": row.get("body_part"),
+            "situation": nan(row["situation"]),
+            "body_part": nan(row.get("body_part")),
         }
 
     @staticmethod
