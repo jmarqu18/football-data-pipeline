@@ -209,6 +209,14 @@ class APIFootballLoader:
         # Check API-level errors
         api_errors = data.get("errors")
         if api_errors and len(api_errors) > 0:
+            errors_dict = api_errors if isinstance(api_errors, dict) else {}
+            # Rate limit: wait 65s and retry once (rolling 1-minute window)
+            if "rateLimit" in errors_dict:
+                logger.warning(
+                    "Rate limit hit for %s %s — sleeping 65s then retrying", endpoint, params
+                )
+                time.sleep(65)
+                return self._make_request(endpoint, params, force_refresh=force_refresh)
             # errors can be a list or a dict depending on the error type
             msg = f"API-Football error for {endpoint} {params}: {api_errors}"
             logger.error(msg)
@@ -258,9 +266,19 @@ class APIFootballLoader:
 
         while True:
             page_params = {**params, "page": page}
-            data = self._make_request(
-                endpoint, page_params, force_refresh=force_refresh
-            )
+            try:
+                data = self._make_request(
+                    endpoint, page_params, force_refresh=force_refresh
+                )
+            except APIFootballError as exc:
+                if page > 1:
+                    # Free plan limits pagination (e.g. max 3 pages). Return
+                    # whatever we have collected so far rather than crashing.
+                    logger.warning(
+                        "Stopping pagination at page %d for %s: %s", page, endpoint, exc
+                    )
+                    break
+                raise
             all_items.extend(data.get("response", []))
 
             paging = data.get("paging", {})
@@ -456,9 +474,9 @@ class APIFootballLoader:
             "league": self._config.league_id,
             "season": self._config.season,
         }
-        raw_items = self._paginate(
-            "injuries", params, force_refresh=force_refresh
-        )
+        # /injuries does not support the `page` parameter — use _make_request directly.
+        data = self._make_request("injuries", params, force_refresh=force_refresh)
+        raw_items = data.get("response", [])
 
         injuries: list[RawAPIFootballInjury] = []
         rejected = 0
