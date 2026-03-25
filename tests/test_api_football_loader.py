@@ -325,6 +325,68 @@ class TestPlayerExtraction:
         assert len(players) == 0
         assert len(stats) == 0
 
+    def test_ingest_players_per_team_two_calls(self, tmp_path: Path) -> None:
+        """ingest_players(team_ids=...) makes one paginated call per team."""
+        fixture = _load_fixture("api_football_players_response.json")
+        team1_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+        team2_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+
+        client = _mock_client([team1_resp, team2_resp])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players(team_ids=[529, 541])
+
+        # 2 unique player profiles (deduped by player_id across teams)
+        assert len(players) == 2
+        # 2 stats per team × 2 teams = 4 stat rows (player×team granularity)
+        assert len(stats) == 4
+        assert client.get.call_count == 2
+
+    def test_ingest_players_per_team_keeps_stats_per_team(self, tmp_path: Path) -> None:
+        """A transferred player produces one profile but one stat row per team."""
+        fixture = _load_fixture("api_football_players_response.json")
+        team1_resp = {**fixture, "paging": {"current": 1, "total": 1}}
+        # Team 541 returns only player 1100 with team-541 stats
+        team2_item = {
+            "player": fixture["response"][0]["player"],
+            "statistics": [{
+                **fixture["response"][0]["statistics"][0],
+                "team": {"id": 541, "name": "Real Madrid",
+                         "logo": "https://media.api-sports.io/football/teams/541.png"},
+            }],
+        }
+        team2_resp = {
+            **fixture,
+            "results": 1,
+            "paging": {"current": 1, "total": 1},
+            "response": [team2_item],
+        }
+
+        client = _mock_client([team1_resp, team2_resp])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players(team_ids=[529, 541])
+
+        # Player 1100 appears in both teams → 1 profile, 2 separate stat rows
+        assert len([p for p in players if p.player_id == 1100]) == 1
+        player_1100_stats = [s for s in stats if s.player_id == 1100]
+        assert len(player_1100_stats) == 2  # team 529 + team 541
+        assert {s.team_id for s in player_1100_stats} == {529, 541}
+
+    def test_ingest_players_league_fallback(self, tmp_path: Path) -> None:
+        """ingest_players() without team_ids falls back to league-level pagination."""
+        fixture = _load_fixture("api_football_players_response.json")
+        client = _mock_client([fixture])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players()
+
+        assert len(players) == 2
+        assert client.get.call_count == 1
+
 
 # ─────────────────────────────────────────────────────────────
 # Injury extraction
