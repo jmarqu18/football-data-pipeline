@@ -446,38 +446,117 @@ class APIFootballLoader:
         return team_ids
 
     def ingest_players(
-        self, *, force_refresh: bool = False
+        self,
+        *,
+        team_ids: list[int] | None = None,
+        force_refresh: bool = False,
     ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
         """Ingest players and their season statistics from ``/players``.
 
-        Paginates automatically.  Each player may produce multiple
-        ``RawAPIFootballPlayerStats`` records (one per team/league/season).
+        Supports two modes:
+        - **Per-team** (recommended for free tier): pass ``team_ids`` to
+          paginate each team independently, bypassing the 3-page global limit.
+        - **Per-league** (fallback): omit ``team_ids`` to paginate the full
+          league in a single query (limited to 3 pages / 60 players on free tier).
+
+        Args:
+            team_ids: If provided, fetch players for each team separately.
+            force_refresh: If ``True``, skip cache for all requests.
 
         Returns:
             Tuple of (validated players, validated player stats).
         """
-        params: dict[str, str | int] = {
-            "league": self._config.league_id,
-            "season": self._config.season,
-        }
-        raw_items = self._paginate("players", params, force_refresh=force_refresh)
+        if team_ids:
+            raw_items = self._fetch_players_per_team(
+                team_ids, force_refresh=force_refresh
+            )
+        else:
+            params: dict[str, str | int] = {
+                "league": self._config.league_id,
+                "season": self._config.season,
+            }
+            raw_items = self._paginate(
+                "players", params, force_refresh=force_refresh
+            )
 
+        return self._parse_player_items(raw_items)
+
+    def _fetch_players_per_team(
+        self,
+        team_ids: list[int],
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict]:
+        """Paginate ``/players`` per team to bypass the free-tier 3-page limit.
+
+        Each team is queried independently (``?team={id}&season={}``).
+        The returned list contains ALL items across all teams — one item per
+        player per team.  A player who transferred mid-season appears once per
+        team with that team's ``statistics[]`` entry, preserving full
+        player×team granularity.  Profile deduplication is handled downstream
+        in ``_parse_player_items``.
+
+        Args:
+            team_ids: Team IDs to iterate over.
+            force_refresh: If ``True``, skip cache lookup.
+
+        Returns:
+            Flat list of raw response items (one per player×team).
+        """
+        all_items: list[dict] = []
+
+        for team_id in team_ids:
+            params: dict[str, str | int] = {
+                "league": self._config.league_id,
+                "season": self._config.season,
+                "team": team_id,
+            }
+            team_items = self._paginate(
+                "players", params, force_refresh=force_refresh
+            )
+            all_items.extend(team_items)
+
+        logger.info(
+            "Per-team fetch: %d teams queried, %d player×team items collected",
+            len(team_ids),
+            len(all_items),
+        )
+        return all_items
+
+    def _parse_player_items(
+        self, raw_items: list[dict]
+    ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
+        """Validate and extract player profiles and stats from raw API items.
+
+        - ``players``: one ``RawAPIFootballPlayer`` per unique ``player_id``
+          (profile data: bio, photo, physical attributes).
+        - ``stats``: one ``RawAPIFootballPlayerStats`` per ``statistics[]``
+          entry, i.e. one row per (player_id, team_id, season).  A player
+          who transferred mid-season produces two stat rows — one per team.
+
+        Factored out of ``ingest_players`` so both per-team and per-league
+        paths share identical parsing logic.
+        """
         players: list[RawAPIFootballPlayer] = []
         stats: list[RawAPIFootballPlayerStats] = []
+        seen_player_ids: set[int] = set()
         rejected = 0
 
         for item in raw_items:
-            # Extract player
             try:
                 player_dict = self._extract_player(item)
-                players.append(RawAPIFootballPlayer.model_validate(player_dict))
+                pid = player_dict["player_id"]
+                # One profile per player — deduplicate across per-team items
+                if pid not in seen_player_ids:
+                    players.append(RawAPIFootballPlayer.model_validate(player_dict))
+                    seen_player_ids.add(pid)
             except (ValidationError, KeyError) as exc:
-                player_id = item.get("player", {}).get("id", "unknown")
-                logger.warning("Rejected player %s: %s", player_id, exc)
+                pid = item.get("player", {}).get("id", "unknown")
+                logger.warning("Rejected player %s: %s", pid, exc)
                 rejected += 1
                 continue
 
-            # Extract stats (one per statistics[] entry)
+            # One stat row per (player_id, team_id) — keep all entries
             for stat_entry in item.get("statistics", []):
                 try:
                     stat_dict = self._extract_player_stats(
@@ -495,7 +574,7 @@ class APIFootballLoader:
                     rejected += 1
 
         logger.info(
-            "Players ingested: %d players, %d stats, %d rejected, "
+            "Players ingested: %d profiles, %d stat rows, %d rejected, "
             "%d API calls, %d from cache",
             len(players),
             len(stats),
