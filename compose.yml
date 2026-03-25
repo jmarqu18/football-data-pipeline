@@ -13,6 +13,12 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-dev-secret-key-change-in-prod}
+    # Airflow 3.x: secreto compartido para firma JWT entre todos los contenedores.
+    # Sin esto, cada contenedor genera su propio secreto aleatorio → Signature verification failed.
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-dev-jwt-secret-change-in-prod}
+    # Airflow 3.x: LocalExecutor se comunica con el api-server via httpx.
+    # Sin esta URL, el executor intenta localhost:8080 → Connection refused.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
     # Airflow 3.x SimpleAuthManager: usuario admin con role Admin
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:Admin
     # Fichero de contraseñas en el bind mount (persiste entre reinicios)
@@ -90,7 +96,20 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  # 5. Datasette (:8001) ─────────────────────────────────────────────────────
+  # 5. Airflow DAG Processor ────────────────────────────────────────────────
+  # Airflow 3.x separó el procesado de ficheros DAG del scheduler.
+  # Sin este servicio, los DAGs nunca se registran en la base de datos.
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: airflow dag-processor
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # 6. Datasette (:8001) ─────────────────────────────────────────────────────
   # Nota: el entrypoint de la imagen Airflow (/entrypoint) intercepta todos los
   # comandos como subcomandos de airflow. Se sobreescribe para pasar directo a
   # dumb-init sin el wrapper de Airflow.

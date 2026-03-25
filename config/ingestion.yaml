@@ -1,7 +1,7 @@
 sources:
   api_football:
     league_id: 140        # La Liga
-    season: 2025
+    season: 2024          # Free plan: 2022-2024 only
     endpoints:
       - players_stats
       - injuries
@@ -10,7 +10,7 @@ sources:
     cache_ttl_hours: 168  # 7 days
     rate_limit:
       max_calls_per_day: 100
-      delay_between_calls: 1.0  # seconds
+      delay_between_calls: 7.0  # seconds — free plan: 10 req/min → ≥6s between calls
   understat:
-    league: "La Liga"
-    season: "2025/2026"
+    league: "ESP-La Liga"   # soccerdata format (was "La Liga")
+    season: "2024/2025"     # Aligns with API-Football season 2024

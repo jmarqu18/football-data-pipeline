@@ -240,7 +240,7 @@ def insert_players(
                     "u_id": player.understat_id,
                     "canon": player.canonical_name,
                     "known": player.known_name,
-                    "bdate": parse_date(player.birth_date) if player.birth_date else None,
+                    "bdate": player.birth_date,  # already a date | None from Pydantic
                     "nat": player.nationality,
                     "photo": player.photo_url,
                     "conf": player.resolution_confidence,
