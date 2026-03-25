@@ -595,6 +595,62 @@ class TestIngestAll:
 
 
 # ─────────────────────────────────────────────────────────────
+# Team IDs
+# ─────────────────────────────────────────────────────────────
+
+
+class TestFetchTeamIds:
+    """Tests for fetch_team_ids — single-call team discovery."""
+
+    def test_fetch_team_ids_returns_sorted_ids(self, tmp_path: Path) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        client = _mock_client([fixture])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        team_ids = loader.fetch_team_ids()
+
+        assert team_ids == [529, 541]
+        client.get.assert_called_once()
+
+    def test_fetch_team_ids_uses_cache(self, tmp_path: Path) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        config = _make_config(tmp_path)
+
+        # Pre-populate cache
+        cache_file = (
+            tmp_path / "cache" / "teams" / "league_140_season_2024.json"
+        )
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        with cache_file.open("w", encoding="utf-8") as f:
+            json.dump(fixture, f)
+
+        client = _mock_client([])
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        team_ids = loader.fetch_team_ids()
+
+        assert team_ids == [529, 541]
+        client.get.assert_not_called()
+
+    def test_fetch_team_ids_empty_response_raises(self, tmp_path: Path) -> None:
+        empty_response = {
+            "get": "teams",
+            "parameters": {"league": "140", "season": "2024"},
+            "errors": [],
+            "results": 0,
+            "paging": {"current": 1, "total": 1},
+            "response": [],
+        }
+        client = _mock_client([empty_response])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        with pytest.raises(APIFootballError, match="No teams found"):
+            loader.fetch_team_ids()
+
+
+# ─────────────────────────────────────────────────────────────
 # Context manager
 # ─────────────────────────────────────────────────────────────
 
