@@ -602,16 +602,20 @@ class TestIngestAll:
 class TestFetchTeamIds:
     """Tests for fetch_team_ids — single-call team discovery."""
 
-    def test_fetch_team_ids_returns_sorted_ids(self, tmp_path: Path) -> None:
+    def test_fetch_team_ids_returns_sorted_ids(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         fixture = _load_fixture("api_football_teams_response.json")
         client = _mock_client([fixture])
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
-        team_ids = loader.fetch_team_ids()
+        with caplog.at_level("INFO"):
+            team_ids = loader.fetch_team_ids()
 
         assert team_ids == [529, 541]
         client.get.assert_called_once()
+        assert "Fetched 2 team IDs" in caplog.text
 
     def test_fetch_team_ids_uses_cache(self, tmp_path: Path) -> None:
         fixture = _load_fixture("api_football_teams_response.json")

@@ -421,7 +421,13 @@ class APIFootballLoader:
         data = self._make_request("teams", params, force_refresh=force_refresh)
         raw_teams = data.get("response", [])
 
-        team_ids = sorted(item["team"]["id"] for item in raw_teams)
+        team_ids_list: list[int] = []
+        for item in raw_teams:
+            try:
+                team_ids_list.append(item["team"]["id"])
+            except KeyError as exc:
+                logger.warning("Skipping malformed team entry: %s — %s", item, exc)
+        team_ids = sorted(team_ids_list)
 
         if not team_ids:
             msg = (
