@@ -239,6 +239,32 @@ class RawAPIFootballTransfer(BaseModel):
     type: str | None = None
 
 
+class RawAPIFootballTeam(BaseModel):
+    """Team metadata from the API-Football ``/teams`` endpoint.
+
+    Captures team identity, founding info, and home venue.
+    ``venue.id`` is intentionally excluded — it has no downstream use.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    team_id: int = Field(ge=1)
+    name: str
+    code: str | None = None          # e.g. "BAR"
+    country: str | None = None
+    founded: int | None = Field(default=None, ge=1800, le=2100)
+    national: bool = False
+    logo_url: str | None = None      # team.logo in the API response
+
+    # Venue — all nullable (some national teams have no venue)
+    venue_name: str | None = None
+    venue_address: str | None = None
+    venue_city: str | None = None
+    venue_capacity: int | None = Field(default=None, ge=0)
+    venue_surface: str | None = None
+    venue_image_url: str | None = None
+
+
 # ─────────────────────────────────────────────────────────────
 # Understat
 # ─────────────────────────────────────────────────────────────

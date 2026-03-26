@@ -17,6 +17,7 @@ from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
     RawAPIFootballStandings,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
@@ -527,6 +528,76 @@ class TestRawAPIFootballTransfer:
         )
         restored = RawAPIFootballTransfer.model_validate_json(t.model_dump_json())
         assert restored == t
+
+
+# ─────────────────────────────────────────────────────────────
+# RawAPIFootballTeam
+# ─────────────────────────────────────────────────────────────
+
+
+class TestRawAPIFootballTeam:
+    """Tests for team metadata from API-Football /teams endpoint."""
+
+    def test_full_team_validates(self):
+        team = RawAPIFootballTeam(
+            team_id=529,
+            name="Barcelona",
+            code="BAR",
+            country="Spain",
+            founded=1899,
+            national=False,
+            logo_url="https://media.api-sports.io/football/teams/529.png",
+            venue_name="Camp Nou",
+            venue_address="Les Corts, 08028",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
+            venue_image_url="https://media.api-sports.io/football/venues/19939.png",
+        )
+        assert team.team_id == 529
+        assert team.country == "Spain"
+        assert team.venue_capacity == 55926
+
+    def test_nullable_fields_default_to_none(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        assert team.code is None
+        assert team.country is None
+        assert team.founded is None
+        assert team.venue_name is None
+
+    def test_national_defaults_false(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        assert team.national is False
+
+    def test_rejects_team_id_zero(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=0, name="Test")
+
+    def test_rejects_founded_out_of_range(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", founded=1700)
+
+    def test_rejects_negative_venue_capacity(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", venue_capacity=-1)
+
+    def test_rejects_extra_fields(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", unknown_field="x")
+
+    def test_is_frozen(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        with pytest.raises(ValidationError):
+            team.name = "Changed"  # type: ignore[misc]
+
+    def test_json_roundtrip(self):
+        team = RawAPIFootballTeam(
+            team_id=529, name="Barcelona", code="BAR", country="Spain",
+            founded=1899, national=False, venue_name="Camp Nou",
+            venue_city="Barcelona", venue_capacity=55926, venue_surface="grass",
+        )
+        restored = RawAPIFootballTeam.model_validate_json(team.model_dump_json())
+        assert restored == team
 
 
 # ─────────────────────────────────────────────────────────────
