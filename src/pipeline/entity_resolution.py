@@ -224,7 +224,7 @@ def resolve_teams(
 
     # Log unresolved teams
     for u_team in unmatched_understat:
-        logger.error("Team unresolved: Understat '%s' has no match in API-Football", u_team)
+        logger.warning("Team unresolved: Understat '%s' has no match in API-Football", u_team)
 
     resolved_api_ids = {r.api_football_id for r in resolved}
     for _api_key, api_team in api_normalized.items():

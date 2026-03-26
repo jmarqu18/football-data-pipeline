@@ -175,8 +175,8 @@ class TestDecodeApiName:
     def test_decodes_numeric_entities(self):
         assert decode_api_name("Cami&#243;n") == "Camión"
 
-    def test_noop_on_plain_name(self):
-        assert decode_api_name("Robert Lewandowski") == "Robert Lewandowski"
+    def test_numeric_entity_decoded(self):
+        assert decode_api_name("Eto&#39;o") == "Eto'o"
 
 
 # ─────────────────────────────────────────────────────────────

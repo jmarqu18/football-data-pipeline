@@ -99,18 +99,13 @@ def load_raw_api_football(
     injuries = read_parquet_models(raw_dir / "injuries.parquet", RawAPIFootballInjury)
     transfers = read_parquet_models(raw_dir / "transfers.parquet", RawAPIFootballTransfer)
 
-    # Load teams
+    # Load teams — use shared read_parquet_models() helper
     teams_path = raw_dir / "teams.parquet"
-    raw_teams: list[RawAPIFootballTeam] = []
     if teams_path.exists():
-        teams_df = pq.read_table(teams_path).to_pandas()
-        for row in teams_df.to_dict("records"):
-            try:
-                raw_teams.append(RawAPIFootballTeam.model_validate(row))
-            except ValidationError as exc:
-                logger.warning("Rejected raw team record: %s", exc)
+        raw_teams: list[RawAPIFootballTeam] = read_parquet_models(teams_path, RawAPIFootballTeam)
     else:
         logger.warning("teams.parquet not found at %s — team metadata will be empty", teams_path)
+        raw_teams = []
 
     return players, stats, injuries, transfers, raw_teams
 
@@ -392,13 +387,15 @@ def insert_player_season_advanced(
     us_player_map: dict[int, int],
     team_id_map: dict[int, int],
     season: str,
+    understat_name_to_api_id: dict[str, int] | None = None,
 ) -> int:
     """Insert Understat advanced season stats. Returns count of inserted rows."""
+    name_to_api_id = understat_name_to_api_id or {}
     inserted = 0
     with engine.begin() as conn:
         for up in understat_players:
             pid = us_player_map.get(up.player_id)
-            tid = _find_team_id_by_understat(up.team, team_id_map)
+            tid = _find_team_id_by_understat(up.team, team_id_map, name_to_api_id)
             if pid is None:
                 logger.warning(
                     "Skipping advanced stats for Understat player '%s' (id=%d): no player mapping",
@@ -600,16 +597,14 @@ def insert_player_transfers(
 # Team lookup helper
 # ─────────────────────────────────────────────────────────────
 
-# Module-level cache populated during run_transform_clean
-_understat_team_to_api_id: dict[str, int] = {}
-
 
 def _find_team_id_by_understat(
     understat_team_name: str,
     team_id_map: dict[int, int],
+    understat_name_to_api_id: dict[str, int],
 ) -> int | None:
     """Look up the SERIAL team_id for an Understat team name."""
-    api_id = _understat_team_to_api_id.get(understat_team_name)
+    api_id = understat_name_to_api_id.get(understat_team_name)
     if api_id is not None:
         return team_id_map.get(api_id)
     return None
@@ -665,11 +660,12 @@ def run_transform_clean(
     # 4. Write unresolved report
     write_unresolved_report(resolution_result.unresolved, report_path)
 
-    # 5. Build understat team lookup for insert helpers
-    _understat_team_to_api_id.clear()
-    for team in resolved_teams:
-        if team.understat_name is not None:
-            _understat_team_to_api_id[team.understat_name] = team.api_football_id
+    # 5. Build understat team lookup for insert helpers (local, not module-level global)
+    understat_name_to_api_id: dict[str, int] = {
+        team.understat_name: team.api_football_id
+        for team in resolved_teams
+        if team.understat_name is not None
+    }
 
     # 6. Insert into PostgreSQL
     engine = get_engine(database_url)
@@ -691,13 +687,13 @@ def run_transform_clean(
         engine, stats, af_player_map, team_id_map, season_str
     )
     counts["player_season_advanced"] = insert_player_season_advanced(
-        engine, player_season, us_player_map, team_id_map, season_str
+        engine, player_season, us_player_map, team_id_map, season_str, understat_name_to_api_id
     )
     # Build understat_player_id → SERIAL team_id for shot-level inserts.
     # player_season has one row per player with their team (Understat name).
     us_player_team_map: dict[int, int | None] = {}
     for up in player_season:
-        api_id = _understat_team_to_api_id.get(up.team)
+        api_id = understat_name_to_api_id.get(up.team)
         us_player_team_map[up.player_id] = team_id_map.get(api_id) if api_id else None
 
     counts["player_shots"] = insert_player_shots(

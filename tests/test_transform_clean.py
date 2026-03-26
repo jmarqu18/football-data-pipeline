@@ -335,3 +335,22 @@ def test_transform_uses_teams_parquet_for_country(tmp_path):
     assert len(teams) == 1
     assert teams[0].country == "Spain"
     assert teams[0].venue_capacity == 55926
+
+
+def test_load_raw_api_football_missing_teams_parquet_returns_empty(tmp_path):
+    """When teams.parquet is absent, teams list is empty (no crash)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    api_dir = tmp_path / "api_football"
+    api_dir.mkdir()
+    pq.write_table(pa.Table.from_pylist([]), api_dir / "players.parquet")
+    pq.write_table(pa.Table.from_pylist([]), api_dir / "player_stats.parquet")
+    pq.write_table(pa.Table.from_pylist([]), api_dir / "injuries.parquet")
+    pq.write_table(pa.Table.from_pylist([]), api_dir / "transfers.parquet")
+    # Note: no teams.parquet
+
+    from pipeline.transform_clean import load_raw_api_football
+
+    _, _, _, _, teams = load_raw_api_football(api_dir)
+    assert teams == []
