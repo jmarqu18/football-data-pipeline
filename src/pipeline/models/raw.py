@@ -250,11 +250,11 @@ class RawAPIFootballTeam(BaseModel):
 
     team_id: int = Field(ge=1)
     name: str
-    code: str | None = None          # e.g. "BAR"
+    code: str | None = None  # e.g. "BAR"
     country: str | None = None
     founded: int | None = Field(default=None, ge=1800, le=2100)
     national: bool = False
-    logo_url: str | None = None      # team.logo in the API response
+    logo_url: str | None = None  # team.logo in the API response
 
     # Venue — all nullable (some national teams have no venue)
     venue_name: str | None = None
