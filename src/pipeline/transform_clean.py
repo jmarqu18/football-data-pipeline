@@ -31,6 +31,7 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
@@ -90,13 +91,30 @@ def load_raw_api_football(
     list[RawAPIFootballPlayerStats],
     list[RawAPIFootballInjury],
     list[RawAPIFootballTransfer],
+    list[RawAPIFootballTeam],
 ]:
     """Load all API-Football RAW Parquet files from a directory."""
     players = read_parquet_models(raw_dir / "players.parquet", RawAPIFootballPlayer)
     stats = read_parquet_models(raw_dir / "player_stats.parquet", RawAPIFootballPlayerStats)
     injuries = read_parquet_models(raw_dir / "injuries.parquet", RawAPIFootballInjury)
     transfers = read_parquet_models(raw_dir / "transfers.parquet", RawAPIFootballTransfer)
-    return players, stats, injuries, transfers
+
+    # Load teams
+    teams_path = raw_dir / "teams.parquet"
+    raw_teams: list[RawAPIFootballTeam] = []
+    if teams_path.exists():
+        teams_df = pq.read_table(teams_path).to_pandas()
+        for row in teams_df.to_dict("records"):
+            try:
+                raw_teams.append(RawAPIFootballTeam.model_validate(row))
+            except ValidationError as exc:
+                logger.warning("Rejected raw team record: %s", exc)
+    else:
+        logger.warning(
+            "teams.parquet not found at %s — team metadata will be empty", teams_path
+        )
+
+    return players, stats, injuries, transfers, raw_teams
 
 
 def load_raw_understat(
@@ -624,15 +642,21 @@ def run_transform_clean(
 
     # 1. Load RAW data
     logger.info("Loading RAW Parquet files from %s", raw_dir)
-    players, stats, injuries, transfers = load_raw_api_football(raw_dir / "api_football")
+    players, stats, injuries, transfers, raw_teams = load_raw_api_football(
+        raw_dir / "api_football"
+    )
     shots, player_season = load_raw_understat(raw_dir / "understat")
 
     # 2. Extract unique teams
-    seen_api_teams: dict[int, str] = {}
-    for s in stats:
-        if s.team_id not in seen_api_teams:
-            seen_api_teams[s.team_id] = s.team_name
-    api_teams = [(tid, tname) for tid, tname in seen_api_teams.items()]
+    if raw_teams:
+        api_teams = raw_teams
+    else:
+        logger.warning("No teams.parquet — falling back to team names from player stats")
+        seen: dict[int, str] = {}
+        for s in stats:
+            if s.team_id not in seen:
+                seen[s.team_id] = s.team_name
+        api_teams = [RawAPIFootballTeam(team_id=tid, name=name) for tid, name in seen.items()]
     understat_teams = sorted({p.team for p in player_season})
 
     # 3. Entity resolution

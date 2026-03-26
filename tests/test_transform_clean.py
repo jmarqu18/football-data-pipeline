@@ -10,6 +10,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from pipeline.transform_clean import (
+    load_raw_api_football,
     parse_date,
     parse_measurement,
     parse_rating,
@@ -240,3 +241,101 @@ class TestParseTransferType:
 
     def test_na(self):
         assert parse_transfer_type("N/A") == ("N/A", None)
+
+
+# ─────────────────────────────────────────────────────────────
+# load_raw_api_football — teams.parquet
+# ─────────────────────────────────────────────────────────────
+
+
+def test_load_raw_api_football_loads_teams_parquet(tmp_path):
+    """teams.parquet from RAW layer is loaded and returned as RawAPIFootballTeam list."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from pipeline.models.raw import (
+        RawAPIFootballTeam,
+        _APIFootballCards,
+        _APIFootballDribbles,
+        _APIFootballDuels,
+        _APIFootballFouls,
+        _APIFootballGames,
+        _APIFootballGoals,
+        _APIFootballPasses,
+        _APIFootballPenalty,
+        _APIFootballShots,
+        _APIFootballTackles,
+        RawAPIFootballPlayer,
+        RawAPIFootballPlayerStats,
+        RawAPIFootballInjury,
+        RawAPIFootballTransfer,
+    )
+
+    api_dir = tmp_path / "api_football"
+    api_dir.mkdir()
+
+    # Write a minimal teams.parquet
+    team = RawAPIFootballTeam(
+        team_id=529,
+        name="Barcelona",
+        country="Spain",
+        logo_url="https://example.com/logo.png",
+        venue_name="Camp Nou",
+        venue_capacity=55926,
+    )
+    pq.write_table(pa.Table.from_pylist([team.model_dump()]), api_dir / "teams.parquet")
+
+    # Write empty parquet files for the other entities that load_raw_api_football expects
+    empty_player = RawAPIFootballPlayer(player_id=1, name="Test")
+    pq.write_table(
+        pa.Table.from_pylist([empty_player.model_dump()]), api_dir / "players.parquet"
+    )
+
+    _empty_stats_kwargs = dict(
+        shots=_APIFootballShots(),
+        goals=_APIFootballGoals(),
+        passes=_APIFootballPasses(),
+        tackles=_APIFootballTackles(),
+        duels=_APIFootballDuels(),
+        dribbles=_APIFootballDribbles(),
+        fouls=_APIFootballFouls(),
+        cards=_APIFootballCards(),
+        penalty=_APIFootballPenalty(),
+    )
+    empty_stat = RawAPIFootballPlayerStats(
+        player_id=1,
+        team_id=529,
+        team_name="Barcelona",
+        league_id=140,
+        season=2024,
+        games=_APIFootballGames(),
+        **_empty_stats_kwargs,
+    )
+    pq.write_table(
+        pa.Table.from_pylist([empty_stat.model_dump()]), api_dir / "player_stats.parquet"
+    )
+
+    empty_injury = RawAPIFootballInjury(
+        player_id=1,
+        player_name="Test",
+        team_id=529,
+        team_name="Barcelona",
+        league_id=140,
+        reason="Knee",
+        type="Muscular",
+        date="2024-11-01",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([empty_injury.model_dump()]), api_dir / "injuries.parquet"
+    )
+
+    empty_transfer = RawAPIFootballTransfer(player_id=1, player_name="Test")
+    pq.write_table(
+        pa.Table.from_pylist([empty_transfer.model_dump()]), api_dir / "transfers.parquet"
+    )
+
+    _, _, _, _, teams = load_raw_api_football(api_dir)
+
+    assert len(teams) == 1
+    assert teams[0].country == "Spain"
+    assert teams[0].venue_capacity == 55926
