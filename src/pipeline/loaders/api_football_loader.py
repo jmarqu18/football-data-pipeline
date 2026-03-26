@@ -34,6 +34,7 @@ from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
     RawAPIFootballStandings,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
 )
 
@@ -388,18 +389,38 @@ class APIFootballLoader:
             "type": transfer.get("type"),
         }
 
+    @staticmethod
+    def _extract_team(item: dict) -> RawAPIFootballTeam:
+        """Map one /teams response entry to RawAPIFootballTeam."""
+        t = item["team"]
+        v = item.get("venue") or {}
+        return RawAPIFootballTeam(
+            team_id=t["id"],
+            name=t["name"],
+            code=t.get("code") or None,
+            country=t.get("country") or None,
+            founded=t.get("founded") or None,
+            national=bool(t.get("national", False)),
+            logo_url=t.get("logo") or None,
+            venue_name=v.get("name") or None,
+            venue_address=v.get("address") or None,
+            venue_city=v.get("city") or None,
+            venue_capacity=v.get("capacity") or None,
+            venue_surface=v.get("surface") or None,
+            venue_image_url=v.get("image") or None,
+        )
+
     # ─────────────────────────────────────────────────────────
     # Public ingestion methods
     # ─────────────────────────────────────────────────────────
 
-    def fetch_team_ids(self, *, force_refresh: bool = False) -> list[int]:
-        """Fetch all team IDs for the configured league and season.
+    def fetch_teams(self, *, force_refresh: bool = False) -> list[RawAPIFootballTeam]:
+        """Fetch all teams for the configured league/season (1 API call).
 
-        Calls ``/teams?league={}&season={}`` (1 API call). Used to drive
-        per-team player pagination on the free tier (3-page limit per query).
+        Captures team identity, founding info, logo and home venue.
 
         Returns:
-            Sorted list of team IDs.
+            List of validated team models, sorted by team_id.
 
         Raises:
             APIFootballError: If the response contains zero teams.
@@ -411,26 +432,40 @@ class APIFootballLoader:
         data = self._make_request("teams", params, force_refresh=force_refresh)
         raw_teams = data.get("response", [])
 
-        team_ids_list: list[int] = []
+        teams: list[RawAPIFootballTeam] = []
         for item in raw_teams:
             try:
-                team_ids_list.append(item["team"]["id"])
-            except KeyError as exc:
+                teams.append(self._extract_team(item))
+            except (KeyError, ValidationError) as exc:
                 logger.warning("Skipping malformed team entry: %s — %s", item, exc)
-        team_ids = sorted(team_ids_list)
 
-        if not team_ids:
+        if not teams:
             msg = f"No teams found for league={self._config.league_id} season={self._config.season}"
             logger.error(msg)
             raise APIFootballError(msg)
 
+        teams.sort(key=lambda t: t.team_id)
         logger.info(
-            "Fetched %d team IDs for league %d season %d",
-            len(team_ids),
+            "Fetched %d teams for league %d season %d",
+            len(teams),
             self._config.league_id,
             self._config.season,
         )
-        return team_ids
+        return teams
+
+    def fetch_team_ids(self, *, force_refresh: bool = False) -> list[int]:
+        """Fetch all team IDs for the configured league and season (1 API call).
+
+        Delegates to ``fetch_teams()`` and returns only the IDs.  Used to
+        drive per-team player pagination on the free tier (3-page limit).
+
+        Returns:
+            Sorted list of team IDs.
+
+        Raises:
+            APIFootballError: If the response contains zero teams.
+        """
+        return [t.team_id for t in self.fetch_teams(force_refresh=force_refresh)]
 
     def ingest_players(
         self,

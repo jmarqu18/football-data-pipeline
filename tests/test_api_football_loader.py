@@ -22,6 +22,7 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
 )
 
@@ -692,7 +693,7 @@ class TestFetchTeamIds:
 
         assert team_ids == [529, 541]
         client.get.assert_called_once()
-        assert "Fetched 2 team IDs" in caplog.text
+        assert "Fetched 2 teams" in caplog.text
 
     def test_fetch_team_ids_uses_cache(self, tmp_path: Path) -> None:
         fixture = _load_fixture("api_football_teams_response.json")
@@ -727,6 +728,75 @@ class TestFetchTeamIds:
 
         with pytest.raises(APIFootballError, match="No teams found"):
             loader.fetch_team_ids()
+
+
+class TestFetchTeams:
+    """Tests for fetch_teams — returns full RawAPIFootballTeam objects."""
+
+    def test_fetch_teams_returns_models(self, tmp_path: Path) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        client = _mock_client([fixture])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        teams = loader.fetch_teams()
+
+        assert len(teams) == 2
+        barca = next(t for t in teams if t.team_id == 529)
+        assert barca.name == "Barcelona"
+        assert barca.code == "BAR"
+        assert barca.country == "Spain"
+        assert barca.founded == 1899
+        assert barca.national is False
+        assert barca.logo_url == "https://media.api-sports.io/football/teams/529.png"
+
+    def test_fetch_teams_captures_venue(self, tmp_path: Path) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        client = _mock_client([fixture])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        teams = loader.fetch_teams()
+        barca = next(t for t in teams if t.team_id == 529)
+
+        assert barca.venue_capacity == 55926
+        assert barca.venue_surface == "grass"
+
+    def test_fetch_teams_uses_same_cache_as_fetch_team_ids(self, tmp_path: Path) -> None:
+        """fetch_teams and fetch_team_ids share the same cached endpoint call."""
+        fixture = _load_fixture("api_football_teams_response.json")
+        cache_file = tmp_path / "cache" / "teams" / "league_140_season_2024.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        with cache_file.open("w", encoding="utf-8") as f:
+            json.dump(fixture, f)
+
+        client = _mock_client([])
+        loader = APIFootballLoader(config=_make_config(tmp_path), api_key="test-key", client=client)
+
+        teams = loader.fetch_teams()
+        assert len(teams) == 2
+        client.get.assert_not_called()
+
+    def test_fetch_team_ids_delegates_to_fetch_teams(self, tmp_path: Path) -> None:
+        """fetch_team_ids still returns sorted int IDs — delegation is transparent."""
+        fixture = _load_fixture("api_football_teams_response.json")
+        client = _mock_client([fixture])
+        loader = APIFootballLoader(_make_config(tmp_path), "test-key", client=client)
+
+        ids = loader.fetch_team_ids()
+        assert ids == [529, 541]
+
+    def test_fetch_teams_skips_malformed_entry(self, tmp_path: Path, caplog) -> None:
+        fixture = _load_fixture("api_football_teams_response.json")
+        fixture["response"].append({"team": {}})  # missing id → malformed
+        client = _mock_client([fixture])
+        loader = APIFootballLoader(_make_config(tmp_path), "test-key", client=client)
+
+        with caplog.at_level("WARNING"):
+            teams = loader.fetch_teams()
+
+        assert len(teams) == 2
+        assert "Skipping malformed team entry" in caplog.text
 
 
 # ─────────────────────────────────────────────────────────────
