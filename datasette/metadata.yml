@@ -1,8 +1,15 @@
 title: "Football Analytics — La Liga 2025/26"
 description: "Pipeline de datos multi-fuente: API-Football + Understat. Métricas por jugador, tiros shot-level y entity resolution."
 
+# Fichero CSS real servido desde /static/ (montado via --static en compose.yml).
+# El plugin datasette-render-image-tags genera <img width="200">;
+# el CSS usa !important para sobrescribir ese atributo inline.
+extra_css_urls:
+  - /static/custom.css
+
 plugins:
   datasette-vega: {}
+  datasette-render-image-tags: {}
 
 databases:
   enriched:

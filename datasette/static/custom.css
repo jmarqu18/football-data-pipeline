@@ -1,0 +1,10 @@
+/* Override datasette-render-image-tags default width="200" attribute.
+   The plugin renders: <img src="..." width="200" loading="lazy">
+   We need !important to beat the inline HTML attribute. */
+td img {
+    width: auto !important;
+    max-width: 60px !important;
+    max-height: 40px !important;
+    height: auto !important;
+    vertical-align: middle;
+}

@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir \
     "sqlalchemy>=2.0.48" \
     "psycopg2-binary>=2.9.11" \
     "datasette>=0.65.2,<1.0" \
-    "datasette-vega>=0.6"
+    "datasette-vega>=0.6" \
+    "datasette-render-image-tags>=0.1"
 
 # ── Pre-warm tls_requests native library ─────────────────────────────────────
 # soccerdata depends on tls_requests, which lazily downloads a platform-specific
