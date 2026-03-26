@@ -18,8 +18,9 @@ dependencies = [
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.48",
     "psycopg2-binary>=2.9.11",
-    "datasette>=0.65.2",
+    "datasette>=0.65.2,<1.0",
     "datasette-vega>=0.6",
+    "datasette-render-image-tags>=0.1",
     "apache-airflow>=3.1.8",
 ]
 
@@ -27,6 +28,13 @@ dependencies = [
 dev = [
     "pytest>=8.3.5",
     "ruff>=0.15.6",
+    "mypy>=1.13.0"
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
+    "mypy>=1.13.0"
 ]
 
 [build-system]
@@ -38,15 +46,27 @@ packages = ["src/pipeline"]
 
 [tool.ruff]
 target-version = "py313"
-line-length = 100
+line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+]
+ignore = ["E501"]  # Line length handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[dependency-groups]
-dev = [
-    "ruff>=0.15.6",
-]
+[tool.mypy]
+strict = true

@@ -47,9 +47,7 @@ def _mock_client(
     """Create a mock soccerdata Understat client."""
     client = MagicMock()
     client.read_shot_events.return_value = shots_df if shots_df is not None else _shots_dataframe()
-    client.read_player_season_stats.return_value = (
-        season_df if season_df is not None else _season_dataframe()
-    )
+    client.read_player_season_stats.return_value = season_df if season_df is not None else _season_dataframe()
     return client
 
 

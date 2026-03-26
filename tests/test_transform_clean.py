@@ -289,17 +289,17 @@ def test_transform_uses_teams_parquet_for_country(tmp_path):
     empty_player = RawAPIFootballPlayer(player_id=1, name="Test")
     pq.write_table(pa.Table.from_pylist([empty_player.model_dump()]), api_dir / "players.parquet")
 
-    _empty_stats_kwargs = dict(
-        shots=_APIFootballShots(),
-        goals=_APIFootballGoals(),
-        passes=_APIFootballPasses(),
-        tackles=_APIFootballTackles(),
-        duels=_APIFootballDuels(),
-        dribbles=_APIFootballDribbles(),
-        fouls=_APIFootballFouls(),
-        cards=_APIFootballCards(),
-        penalty=_APIFootballPenalty(),
-    )
+    _empty_stats_kwargs = {
+        "shots": _APIFootballShots(),
+        "goals": _APIFootballGoals(),
+        "passes": _APIFootballPasses(),
+        "tackles": _APIFootballTackles(),
+        "duels": _APIFootballDuels(),
+        "dribbles": _APIFootballDribbles(),
+        "fouls": _APIFootballFouls(),
+        "cards": _APIFootballCards(),
+        "penalty": _APIFootballPenalty(),
+    }
     empty_stat = RawAPIFootballPlayerStats(
         player_id=1,
         team_id=529,
@@ -309,9 +309,7 @@ def test_transform_uses_teams_parquet_for_country(tmp_path):
         games=_APIFootballGames(),
         **_empty_stats_kwargs,
     )
-    pq.write_table(
-        pa.Table.from_pylist([empty_stat.model_dump()]), api_dir / "player_stats.parquet"
-    )
+    pq.write_table(pa.Table.from_pylist([empty_stat.model_dump()]), api_dir / "player_stats.parquet")
 
     empty_injury = RawAPIFootballInjury(
         player_id=1,
@@ -326,9 +324,7 @@ def test_transform_uses_teams_parquet_for_country(tmp_path):
     pq.write_table(pa.Table.from_pylist([empty_injury.model_dump()]), api_dir / "injuries.parquet")
 
     empty_transfer = RawAPIFootballTransfer(player_id=1, player_name="Test")
-    pq.write_table(
-        pa.Table.from_pylist([empty_transfer.model_dump()]), api_dir / "transfers.parquet"
-    )
+    pq.write_table(pa.Table.from_pylist([empty_transfer.model_dump()]), api_dir / "transfers.parquet")
 
     _, _, _, _, teams = load_raw_api_football(api_dir)
 

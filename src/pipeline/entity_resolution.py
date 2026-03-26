@@ -455,11 +455,7 @@ def resolve_players(
                 best_score = score
                 best_api_id = api_id
 
-        if (
-            best_api_id is not None
-            and best_score >= _PLAYER_FUZZY_THRESHOLD
-            and not _has_conflict(all_scores)
-        ):
+        if best_api_id is not None and best_score >= _PLAYER_FUZZY_THRESHOLD and not _has_conflict(all_scores):
             api_p = api_player_map[best_api_id]
             resolved.append(_make_resolved(api_p, u_player, 0.90, "fuzzy"))
             matched_api.add(best_api_id)
@@ -492,19 +488,18 @@ def resolve_players(
             best_api_id is not None
             and best_score >= _PLAYER_CROSS_TEAM_THRESHOLD
             and not _has_conflict(all_scores)
+            and _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams)
         ):
-            # Verify transfer history
-            if _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams):
-                api_p = api_player_map[best_api_id]
-                resolved.append(_make_resolved(api_p, u_player, 0.70, "contextual"))
-                matched_api.add(best_api_id)
-                matched_understat.add(u_player.player_id)
-                logger.debug(
-                    "Pass 3 contextual: '%s' ↔ '%s' (score=%.3f, transfer confirmed)",
-                    u_player.player_name,
-                    api_p.name,
-                    best_score,
-                )
+            api_p = api_player_map[best_api_id]
+            resolved.append(_make_resolved(api_p, u_player, 0.70, "contextual"))
+            matched_api.add(best_api_id)
+            matched_understat.add(u_player.player_id)
+            logger.debug(
+                "Pass 3 contextual: '%s' ↔ '%s' (score=%.3f, transfer confirmed)",
+                u_player.player_name,
+                api_p.name,
+                best_score,
+            )
 
     # ── Pass 4: Statistical fingerprint + same team ──
     for u_player in understat_players:

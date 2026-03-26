@@ -448,9 +448,7 @@ class TestTransferExtraction:
         fixture = _load_fixture("api_football_transfers_response.json")
         player = fixture["response"][0]
         transfer = player["transfers"][0]
-        result = APIFootballLoader._extract_transfer(
-            player["player"]["id"], player["player"]["name"], transfer
-        )
+        result = APIFootballLoader._extract_transfer(player["player"]["id"], player["player"]["name"], transfer)
 
         assert result["player_id"] == 276
         assert result["player_name"] == "Neymar"
@@ -465,9 +463,7 @@ class TestTransferExtraction:
         fixture = _load_fixture("api_football_transfers_response.json")
         player = fixture["response"][0]
         transfer = player["transfers"][0]
-        result = APIFootballLoader._extract_transfer(
-            player["player"]["id"], player["player"]["name"], transfer
-        )
+        result = APIFootballLoader._extract_transfer(player["player"]["id"], player["player"]["name"], transfer)
         model = RawAPIFootballTransfer.model_validate(result)
 
         assert model.player_id == 276
@@ -477,9 +473,7 @@ class TestTransferExtraction:
         fixture = _load_fixture("api_football_transfers_response.json")
         player = fixture["response"][1]  # Lamine Yamal — null team_out
         transfer = player["transfers"][0]
-        result = APIFootballLoader._extract_transfer(
-            player["player"]["id"], player["player"]["name"], transfer
-        )
+        result = APIFootballLoader._extract_transfer(player["player"]["id"], player["player"]["name"], transfer)
 
         assert result["team_out_id"] is None
         assert result["team_out_name"] is None
@@ -561,9 +555,7 @@ class TestParquetOutput:
 
     def test_save_parquet_nested_structs(self, tmp_path: Path) -> None:
         fixture = _load_fixture("api_football_players_response.json")
-        stat_dict = APIFootballLoader._extract_player_stats(
-            1100, fixture["response"][0]["statistics"][0]
-        )
+        stat_dict = APIFootballLoader._extract_player_stats(1100, fixture["response"][0]["statistics"][0])
         stat = RawAPIFootballPlayerStats.model_validate(stat_dict)
 
         out_path = tmp_path / "output" / "stats.parquet"
@@ -574,9 +566,7 @@ class TestParquetOutput:
         assert "games" in table.column_names
         assert "penalty" in table.column_names
 
-    def test_save_parquet_empty_list_logs_warning(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_save_parquet_empty_list_logs_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         out_path = tmp_path / "output" / "empty.parquet"
         APIFootballLoader.save_parquet([], out_path)
 
@@ -627,9 +617,7 @@ class TestIngestAll:
         assert (out_dir / "injuries.parquet").exists()
         assert (out_dir / "transfers.parquet").exists()
 
-    def test_ingest_all_logs_summary(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_ingest_all_logs_summary(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         teams_resp = _load_fixture("api_football_teams_response.json")
         players_resp = _load_fixture("api_football_players_response.json")
         injuries_resp = _load_fixture("api_football_injuries_response.json")
@@ -654,9 +642,7 @@ class TestIngestAll:
 
         assert "Ingest complete" in caplog.text
 
-    def test_ingest_all_injuries_only_no_team_fetch(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_ingest_all_injuries_only_no_team_fetch(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         injuries_resp = _load_fixture("api_football_injuries_response.json")
 
         client = _mock_client([injuries_resp])
@@ -679,9 +665,7 @@ class TestIngestAll:
 class TestFetchTeamIds:
     """Tests for fetch_team_ids — single-call team discovery."""
 
-    def test_fetch_team_ids_returns_sorted_ids(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_fetch_team_ids_returns_sorted_ids(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         fixture = _load_fixture("api_football_teams_response.json")
         client = _mock_client([fixture])
         config = _make_config(tmp_path)

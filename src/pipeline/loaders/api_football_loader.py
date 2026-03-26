@@ -165,10 +165,7 @@ class APIFootballLoader:
         # Rate limit check
         max_calls = self._config.rate_limit.max_calls_per_day
         if self._calls_made >= max_calls:
-            msg = (
-                f"Daily rate limit exhausted ({max_calls} calls). "
-                f"Cannot request {endpoint} {params}"
-            )
+            msg = f"Daily rate limit exhausted ({max_calls} calls). Cannot request {endpoint} {params}"
             logger.error(msg)
             raise APIFootballError(msg)
 
@@ -213,9 +210,7 @@ class APIFootballLoader:
             errors_dict = api_errors if isinstance(api_errors, dict) else {}
             # Rate limit: wait 65s and retry once (rolling 1-minute window)
             if "rateLimit" in errors_dict:
-                logger.warning(
-                    "Rate limit hit for %s %s — sleeping 65s then retrying", endpoint, params
-                )
+                logger.warning("Rate limit hit for %s %s — sleeping 65s then retrying", endpoint, params)
                 time.sleep(65)
                 return self._make_request(endpoint, params, force_refresh=force_refresh)
             # errors can be a list or a dict depending on the error type

@@ -8,22 +8,18 @@ LABEL maintainer="Juanje Marquez <juanje.mn@gmail.com>" \
       description="Football data pipeline: API-Football + Understat, orchestrated by Airflow"
 
 # ── Python dependencies ───────────────────────────────────────────────────────
-# apache-airflow is already in the base image — all other project deps go here.
+# Single source of truth: deps come from pyproject.toml, not hardcoded here.
+# apache-airflow is excluded because it ships in the base image already;
+# reinstalling it would conflict with the image's pinned version.
+# tomllib is in Python 3.11+ stdlib — no extra dep needed to parse the TOML.
 # No apt-get layer needed: psycopg2-binary, pyarrow, and lxml (via soccerdata)
 # all ship pre-built binary wheels.
-RUN pip install --no-cache-dir \
-    "pydantic>=2.12.5" \
-    "pyyaml>=6.0.3" \
-    "httpx>=0.27.0" \
-    "soccerdata>=1.8.8" \
-    "rapidfuzz>=3.0.0" \
-    "unidecode>=1.3.0" \
-    "pandas>=2.1.0,<3.0.0" \
-    "pyarrow>=23.0.1" \
-    "sqlalchemy>=2.0.48" \
-    "psycopg2-binary>=2.9.11" \
-    "datasette>=0.65.2,<1.0" \
-    "datasette-vega>=0.6"
+COPY pyproject.toml .
+RUN python3 -c "\
+import tomllib, subprocess, sys; \
+deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; \
+deps = [d for d in deps if not d.lower().startswith('apache-airflow')]; \
+subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-cache-dir', *deps], check=True)"
 
 # ── Pre-warm tls_requests native library ─────────────────────────────────────
 # soccerdata depends on tls_requests, which lazily downloads a platform-specific
