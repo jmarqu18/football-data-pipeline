@@ -31,6 +31,7 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
@@ -90,13 +91,23 @@ def load_raw_api_football(
     list[RawAPIFootballPlayerStats],
     list[RawAPIFootballInjury],
     list[RawAPIFootballTransfer],
+    list[RawAPIFootballTeam],
 ]:
     """Load all API-Football RAW Parquet files from a directory."""
     players = read_parquet_models(raw_dir / "players.parquet", RawAPIFootballPlayer)
     stats = read_parquet_models(raw_dir / "player_stats.parquet", RawAPIFootballPlayerStats)
     injuries = read_parquet_models(raw_dir / "injuries.parquet", RawAPIFootballInjury)
     transfers = read_parquet_models(raw_dir / "transfers.parquet", RawAPIFootballTransfer)
-    return players, stats, injuries, transfers
+
+    # Load teams — use shared read_parquet_models() helper
+    teams_path = raw_dir / "teams.parquet"
+    if teams_path.exists():
+        raw_teams: list[RawAPIFootballTeam] = read_parquet_models(teams_path, RawAPIFootballTeam)
+    else:
+        logger.warning("teams.parquet not found at %s — team metadata will be empty", teams_path)
+        raw_teams = []
+
+    return players, stats, injuries, transfers, raw_teams
 
 
 def load_raw_understat(
@@ -192,14 +203,31 @@ def insert_teams(
                 text(
                     "INSERT INTO teams "
                     "(api_football_id, understat_name, canonical_name, "
+                    "country, logo_url, code, founded, "
+                    "venue_name, venue_address, venue_city, "
+                    "venue_capacity, venue_surface, venue_image_url, "
                     "resolution_confidence, resolution_method, resolved_at) "
-                    "VALUES (:af_id, :u_name, :canon, :conf, :method, :resolved_at) "
+                    "VALUES (:af_id, :u_name, :canon, "
+                    ":country, :logo_url, :code, :founded, "
+                    ":venue_name, :venue_address, :venue_city, "
+                    ":venue_capacity, :venue_surface, :venue_image_url, "
+                    ":conf, :method, :resolved_at) "
                     "RETURNING team_id"
                 ),
                 {
                     "af_id": team.api_football_id,
                     "u_name": team.understat_name,
                     "canon": team.canonical_name,
+                    "country": team.country,
+                    "logo_url": team.logo_url,
+                    "code": team.code,
+                    "founded": team.founded,
+                    "venue_name": team.venue_name,
+                    "venue_address": team.venue_address,
+                    "venue_city": team.venue_city,
+                    "venue_capacity": team.venue_capacity,
+                    "venue_surface": team.venue_surface,
+                    "venue_image_url": team.venue_image_url,
                     "conf": team.resolution_confidence,
                     "method": team.resolution_method,
                     "resolved_at": team.resolved_at,
@@ -359,13 +387,15 @@ def insert_player_season_advanced(
     us_player_map: dict[int, int],
     team_id_map: dict[int, int],
     season: str,
+    understat_name_to_api_id: dict[str, int] | None = None,
 ) -> int:
     """Insert Understat advanced season stats. Returns count of inserted rows."""
+    name_to_api_id = understat_name_to_api_id or {}
     inserted = 0
     with engine.begin() as conn:
         for up in understat_players:
             pid = us_player_map.get(up.player_id)
-            tid = _find_team_id_by_understat(up.team, team_id_map)
+            tid = _find_team_id_by_understat(up.team, team_id_map, name_to_api_id)
             if pid is None:
                 logger.warning(
                     "Skipping advanced stats for Understat player '%s' (id=%d): no player mapping",
@@ -567,16 +597,14 @@ def insert_player_transfers(
 # Team lookup helper
 # ─────────────────────────────────────────────────────────────
 
-# Module-level cache populated during run_transform_clean
-_understat_team_to_api_id: dict[str, int] = {}
-
 
 def _find_team_id_by_understat(
     understat_team_name: str,
     team_id_map: dict[int, int],
+    understat_name_to_api_id: dict[str, int],
 ) -> int | None:
     """Look up the SERIAL team_id for an Understat team name."""
-    api_id = _understat_team_to_api_id.get(understat_team_name)
+    api_id = understat_name_to_api_id.get(understat_team_name)
     if api_id is not None:
         return team_id_map.get(api_id)
     return None
@@ -607,15 +635,19 @@ def run_transform_clean(
 
     # 1. Load RAW data
     logger.info("Loading RAW Parquet files from %s", raw_dir)
-    players, stats, injuries, transfers = load_raw_api_football(raw_dir / "api_football")
+    players, stats, injuries, transfers, raw_teams = load_raw_api_football(raw_dir / "api_football")
     shots, player_season = load_raw_understat(raw_dir / "understat")
 
     # 2. Extract unique teams
-    seen_api_teams: dict[int, str] = {}
-    for s in stats:
-        if s.team_id not in seen_api_teams:
-            seen_api_teams[s.team_id] = s.team_name
-    api_teams = [(tid, tname) for tid, tname in seen_api_teams.items()]
+    if raw_teams:
+        api_teams = raw_teams
+    else:
+        logger.warning("No teams.parquet — falling back to team names from player stats")
+        seen: dict[int, str] = {}
+        for s in stats:
+            if s.team_id not in seen:
+                seen[s.team_id] = s.team_name
+        api_teams = [RawAPIFootballTeam(team_id=tid, name=name) for tid, name in seen.items()]
     understat_teams = sorted({p.team for p in player_season})
 
     # 3. Entity resolution
@@ -628,11 +660,12 @@ def run_transform_clean(
     # 4. Write unresolved report
     write_unresolved_report(resolution_result.unresolved, report_path)
 
-    # 5. Build understat team lookup for insert helpers
-    _understat_team_to_api_id.clear()
-    for team in resolved_teams:
-        if team.understat_name is not None:
-            _understat_team_to_api_id[team.understat_name] = team.api_football_id
+    # 5. Build understat team lookup for insert helpers (local, not module-level global)
+    understat_name_to_api_id: dict[str, int] = {
+        team.understat_name: team.api_football_id
+        for team in resolved_teams
+        if team.understat_name is not None
+    }
 
     # 6. Insert into PostgreSQL
     engine = get_engine(database_url)
@@ -654,13 +687,13 @@ def run_transform_clean(
         engine, stats, af_player_map, team_id_map, season_str
     )
     counts["player_season_advanced"] = insert_player_season_advanced(
-        engine, player_season, us_player_map, team_id_map, season_str
+        engine, player_season, us_player_map, team_id_map, season_str, understat_name_to_api_id
     )
     # Build understat_player_id → SERIAL team_id for shot-level inserts.
     # player_season has one row per player with their team (Understat name).
     us_player_team_map: dict[int, int | None] = {}
     for up in player_season:
-        api_id = _understat_team_to_api_id.get(up.team)
+        api_id = understat_name_to_api_id.get(up.team)
         us_player_team_map[up.player_id] = team_id_map.get(api_id) if api_id else None
 
     counts["player_shots"] = insert_player_shots(

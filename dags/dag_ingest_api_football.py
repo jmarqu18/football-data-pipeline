@@ -41,15 +41,17 @@ def ingest_api_football() -> None:
 
     @task
     def fetch_teams_task() -> list[int]:
-        """Discover all team IDs for the configured league (1 API call)."""
+        """Discover all teams for the configured league; save metadata to Parquet."""
         cfg = get_config().sources.api_football
         api_key = os.environ["API_FOOTBALL_KEY"]
 
         with APIFootballLoader(config=cfg, api_key=api_key) as loader:
-            team_ids = loader.fetch_team_ids()
+            teams = loader.fetch_teams()
 
-        logger.info("Discovered %d teams", len(team_ids))
-        return team_ids
+        _RAW_DIR.mkdir(parents=True, exist_ok=True)
+        APIFootballLoader.save_parquet(teams, _RAW_DIR / "teams.parquet")
+        logger.info("Teams fetched: %d teams", len(teams))
+        return [t.team_id for t in teams]
 
     @task
     def ingest_players_task(team_ids: list[int]) -> None:

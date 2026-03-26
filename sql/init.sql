@@ -11,10 +11,21 @@ CREATE TABLE teams (
     api_football_id       INT UNIQUE,
     understat_name        TEXT,
     canonical_name        TEXT NOT NULL,
-    country               TEXT,          -- nullable; requiere endpoint /teams (fuera de scope actual)
-    logo_url              TEXT,          -- nullable; requiere endpoint /teams
+    -- Team identity
+    country               TEXT,
+    logo_url              TEXT,
+    code                  TEXT,
+    founded               SMALLINT,
+    -- Home venue
+    venue_name            TEXT,
+    venue_address         TEXT,
+    venue_city            TEXT,
+    venue_capacity        INT,
+    venue_surface         TEXT,
+    venue_image_url       TEXT,
+    -- Resolution metadata
     resolution_confidence DECIMAL(3,2),
-    resolution_method     TEXT,          -- 'exact' | 'fuzzy' | 'contextual'
+    resolution_method     TEXT,
     resolved_at           TIMESTAMPTZ,
     created_at            TIMESTAMPTZ    DEFAULT NOW()
 );

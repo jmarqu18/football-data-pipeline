@@ -53,15 +53,20 @@ class UnderstatLoader:
 
     @staticmethod
     def _nan_to_none(value: object) -> object:
-        """Convert pandas NaN (float) to None; leave everything else unchanged.
+        """Convert pandas NaN/NA to None; leave everything else unchanged.
 
-        pandas ``to_dict("records")`` emits ``float('nan')`` for missing cells.
-        Pydantic v2 rejects NaN when the expected type is ``str | None``,
-        so we normalise it to ``None`` before validation.
+        ``to_dict("records")`` on a ``convert_dtypes()`` DataFrame emits
+        ``pd.NA`` (not ``float('nan')``) for missing cells.  Pydantic v2
+        rejects both forms when the expected type is ``str | None``, so we
+        normalise both to ``None`` before validation.
         """
-        try:
-            import math
+        import math
 
+        import pandas as pd
+
+        if value is pd.NA:
+            return None
+        try:
             if isinstance(value, float) and math.isnan(value):
                 return None
         except (TypeError, ValueError):

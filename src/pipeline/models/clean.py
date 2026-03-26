@@ -23,6 +23,18 @@ class ResolvedTeam(BaseModel):
     api_football_id: int = Field(ge=1)
     api_football_name: str
     understat_name: str | None = None
+    # Team identity metadata
+    country: str | None = None
+    logo_url: str | None = None
+    code: str | None = None
+    founded: int | None = None
+    # Venue metadata
+    venue_name: str | None = None
+    venue_address: str | None = None
+    venue_city: str | None = None
+    venue_capacity: int | None = None
+    venue_surface: str | None = None
+    venue_image_url: str | None = None
     resolution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     resolution_method: ResolutionMethod | None = None
     resolved_at: datetime | None = None

@@ -1,4 +1,4 @@
-"""Unit tests for RAW layer Pydantic models.
+"""Unit tests for RAW layer Pydantic models and selected CLEAN layer models.
 
 Each test uses realistic data modelled from the actual sources
 (API-Football, Understat) to validate schema and basic types.
@@ -7,6 +7,7 @@ Each test uses realistic data modelled from the actual sources
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
     RawAPIFootballStandings,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     RawUnderstatShot,
@@ -527,6 +529,83 @@ class TestRawAPIFootballTransfer:
         )
         restored = RawAPIFootballTransfer.model_validate_json(t.model_dump_json())
         assert restored == t
+
+
+# ─────────────────────────────────────────────────────────────
+# RawAPIFootballTeam
+# ─────────────────────────────────────────────────────────────
+
+
+class TestRawAPIFootballTeam:
+    """Tests for team metadata from API-Football /teams endpoint."""
+
+    def test_full_team_validates(self):
+        team = RawAPIFootballTeam(
+            team_id=529,
+            name="Barcelona",
+            code="BAR",
+            country="Spain",
+            founded=1899,
+            national=False,
+            logo_url="https://media.api-sports.io/football/teams/529.png",
+            venue_name="Camp Nou",
+            venue_address="Les Corts, 08028",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
+            venue_image_url="https://media.api-sports.io/football/venues/19939.png",
+        )
+        assert team.team_id == 529
+        assert team.country == "Spain"
+        assert team.venue_capacity == 55926
+
+    def test_nullable_fields_default_to_none(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        assert team.code is None
+        assert team.country is None
+        assert team.founded is None
+        assert team.venue_name is None
+
+    def test_national_defaults_false(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        assert team.national is False
+
+    def test_rejects_team_id_zero(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=0, name="Test")
+
+    def test_rejects_founded_out_of_range(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", founded=1700)
+
+    def test_rejects_negative_venue_capacity(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", venue_capacity=-1)
+
+    def test_rejects_extra_fields(self):
+        with pytest.raises(ValidationError):
+            RawAPIFootballTeam(team_id=1, name="Test", unknown_field="x")
+
+    def test_is_frozen(self):
+        team = RawAPIFootballTeam(team_id=1, name="FC Test")
+        with pytest.raises(ValidationError):
+            team.name = "Changed"  # type: ignore[misc]
+
+    def test_json_roundtrip(self):
+        team = RawAPIFootballTeam(
+            team_id=529,
+            name="Barcelona",
+            code="BAR",
+            country="Spain",
+            founded=1899,
+            national=False,
+            venue_name="Camp Nou",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
+        )
+        restored = RawAPIFootballTeam.model_validate_json(team.model_dump_json())
+        assert restored == team
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1149,3 +1228,67 @@ class TestRawAPIFootballStandings:
         )
         restored = RawAPIFootballStandings.model_validate_json(s.model_dump_json())
         assert restored == s
+
+
+# ─────────────────────────────────────────────────────────────
+# ResolvedTeam (CLEAN layer) — metadata fields
+# ─────────────────────────────────────────────────────────────
+
+
+class TestResolvedTeamFields:
+    """Tests for the new optional metadata fields on ResolvedTeam."""
+
+    def test_resolved_team_accepts_full_metadata(self):
+        """ResolvedTeam can be constructed with all new metadata fields."""
+        from datetime import datetime
+
+        from pipeline.models.clean import ResolvedTeam
+
+        team = ResolvedTeam(
+            canonical_name="Barcelona",
+            api_football_id=529,
+            api_football_name="Barcelona",
+            country="Spain",
+            logo_url="https://media.api-sports.io/football/teams/529.png",
+            code="BAR",
+            founded=1899,
+            venue_name="Camp Nou",
+            venue_address="Carrer d'Arístides Maillol, Barcelona",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
+            venue_image_url="https://media.api-sports.io/football/venues/529.png",
+            resolved_at=datetime(2025, 3, 1, tzinfo=UTC),
+        )
+
+        assert team.country == "Spain"
+        assert team.logo_url == "https://media.api-sports.io/football/teams/529.png"
+        assert team.code == "BAR"
+        assert team.founded == 1899
+        assert team.venue_name == "Camp Nou"
+        assert team.venue_address == "Carrer d'Arístides Maillol, Barcelona"
+        assert team.venue_city == "Barcelona"
+        assert team.venue_capacity == 55926
+        assert team.venue_surface == "grass"
+        assert team.venue_image_url == "https://media.api-sports.io/football/venues/529.png"
+
+    def test_resolved_team_metadata_all_nullable(self):
+        """ResolvedTeam can be constructed without any new metadata fields."""
+        from pipeline.models.clean import ResolvedTeam
+
+        team = ResolvedTeam(
+            canonical_name="Real Madrid",
+            api_football_id=541,
+            api_football_name="Real Madrid",
+        )
+
+        assert team.country is None
+        assert team.logo_url is None
+        assert team.code is None
+        assert team.founded is None
+        assert team.venue_name is None
+        assert team.venue_address is None
+        assert team.venue_city is None
+        assert team.venue_capacity is None
+        assert team.venue_surface is None
+        assert team.venue_image_url is None

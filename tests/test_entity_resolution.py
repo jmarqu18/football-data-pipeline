@@ -18,6 +18,7 @@ import pytest
 from pipeline.entity_resolution import (
     best_match_score,
     build_name_variants,
+    decode_api_name,
     normalize_name,
     resolve_players,
     resolve_teams,
@@ -26,6 +27,7 @@ from pipeline.entity_resolution import (
 from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
+    RawAPIFootballTeam,
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
     _APIFootballCards,
@@ -149,6 +151,33 @@ class TestNormalizeName:
     def test_empty_string(self):
         assert normalize_name("") == ""
 
+    def test_decodes_html_entities_before_comparison(self):
+        """HTML entities from API-Football are decoded so matching works correctly."""
+        assert normalize_name("E. Eto&apos;o Pineda") == "e. eto'o pineda"
+        assert normalize_name("Marcelo &amp; Silva") == "marcelo & silva"
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: decode_api_name
+# ─────────────────────────────────────────────────────────────
+
+
+class TestDecodeApiName:
+    def test_decodes_apostrophe_entity(self):
+        assert decode_api_name("E. Eto&apos;o Pineda") == "E. Eto'o Pineda"
+
+    def test_decodes_amp_entity(self):
+        assert decode_api_name("Marcelo &amp; Silva") == "Marcelo & Silva"
+
+    def test_passthrough_clean_name(self):
+        assert decode_api_name("Robert Lewandowski") == "Robert Lewandowski"
+
+    def test_decodes_numeric_entities(self):
+        assert decode_api_name("Cami&#243;n") == "Camión"
+
+    def test_numeric_entity_decoded(self):
+        assert decode_api_name("Eto&#39;o") == "Eto'o"
+
 
 # ─────────────────────────────────────────────────────────────
 # Test: build_name_variants
@@ -210,7 +239,12 @@ class TestBestMatchScore:
 
 class TestResolveTeams:
     def test_exact_match(self):
-        api_teams = [(529, "Barcelona"), (541, "Real Madrid")]
+        from pipeline.models.raw import RawAPIFootballTeam
+
+        api_teams = [
+            RawAPIFootballTeam(team_id=529, name="Barcelona"),
+            RawAPIFootballTeam(team_id=541, name="Real Madrid"),
+        ]
         understat_teams = ["Barcelona", "Real Madrid"]
         result = resolve_teams(api_teams, understat_teams)
         resolved_names = {r.canonical_name for r in result if r.understat_name}
@@ -218,7 +252,9 @@ class TestResolveTeams:
         assert "Real Madrid" in resolved_names
 
     def test_fuzzy_match(self):
-        api_teams = [(530, "Atletico Madrid")]
+        from pipeline.models.raw import RawAPIFootballTeam
+
+        api_teams = [RawAPIFootballTeam(team_id=530, name="Atletico Madrid")]
         understat_teams = ["Atlético de Madrid"]
         result = resolve_teams(api_teams, understat_teams)
         matched = [r for r in result if r.understat_name]
@@ -226,10 +262,41 @@ class TestResolveTeams:
         assert matched[0].resolution_method == "fuzzy"
 
     def test_unmatched_api_team_kept(self):
-        api_teams = [(529, "Barcelona"), (999, "Promoted Team")]
+        from pipeline.models.raw import RawAPIFootballTeam
+
+        api_teams = [
+            RawAPIFootballTeam(team_id=529, name="Barcelona"),
+            RawAPIFootballTeam(team_id=999, name="Promoted Team"),
+        ]
         understat_teams = ["Barcelona"]
         result = resolve_teams(api_teams, understat_teams)
         assert len(result) == 2
+
+    def test_resolve_teams_propagates_metadata(self):
+        from pipeline.models.raw import RawAPIFootballTeam
+
+        api_teams = [
+            RawAPIFootballTeam(
+                team_id=529,
+                name="Barcelona",
+                code="BAR",
+                country="Spain",
+                founded=1899,
+                logo_url="https://example.com/logo.png",
+                venue_name="Camp Nou",
+                venue_city="Barcelona",
+                venue_capacity=55926,
+                venue_surface="grass",
+            )
+        ]
+        result = resolve_teams(api_teams, understat_teams=["Barcelona"])
+        resolved = next(r for r in result if r.api_football_id == 529)
+        assert resolved.country == "Spain"
+        assert resolved.code == "BAR"
+        assert resolved.founded == 1899
+        assert resolved.venue_name == "Camp Nou"
+        assert resolved.logo_url == "https://example.com/logo.png"
+        assert resolved.venue_capacity == 55926
 
 
 # ─────────────────────────────────────────────────────────────
@@ -374,15 +441,15 @@ def twenty_players_fixture():
     # fmt: on
 
     api_teams = [
-        (BARCA, "Barcelona"),
-        (REAL_MADRID, "Real Madrid"),
-        (ATLETICO, "Atletico Madrid"),
-        (BETIS, "Real Betis"),
-        (VILLARREAL, "Villarreal"),
-        (ATHLETIC, "Athletic Club"),
-        (VALENCIA, "Valencia"),
-        (GETAFE, "Getafe"),
-        (GIRONA, "Girona"),
+        RawAPIFootballTeam(team_id=BARCA, name="Barcelona"),
+        RawAPIFootballTeam(team_id=REAL_MADRID, name="Real Madrid"),
+        RawAPIFootballTeam(team_id=ATLETICO, name="Atletico Madrid"),
+        RawAPIFootballTeam(team_id=BETIS, name="Real Betis"),
+        RawAPIFootballTeam(team_id=VILLARREAL, name="Villarreal"),
+        RawAPIFootballTeam(team_id=ATHLETIC, name="Athletic Club"),
+        RawAPIFootballTeam(team_id=VALENCIA, name="Valencia"),
+        RawAPIFootballTeam(team_id=GETAFE, name="Getafe"),
+        RawAPIFootballTeam(team_id=GIRONA, name="Girona"),
     ]
     understat_teams = [
         "Barcelona",
