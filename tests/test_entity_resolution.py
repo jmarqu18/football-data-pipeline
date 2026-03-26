@@ -18,6 +18,7 @@ import pytest
 from pipeline.entity_resolution import (
     best_match_score,
     build_name_variants,
+    decode_api_name,
     normalize_name,
     resolve_players,
     resolve_teams,
@@ -148,6 +149,33 @@ class TestNormalizeName:
 
     def test_empty_string(self):
         assert normalize_name("") == ""
+
+    def test_decodes_html_entities_before_comparison(self):
+        """HTML entities from API-Football are decoded so matching works correctly."""
+        assert normalize_name("E. Eto&apos;o Pineda") == "e. eto'o pineda"
+        assert normalize_name("Marcelo &amp; Silva") == "marcelo & silva"
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: decode_api_name
+# ─────────────────────────────────────────────────────────────
+
+
+class TestDecodeApiName:
+    def test_decodes_apostrophe_entity(self):
+        assert decode_api_name("E. Eto&apos;o Pineda") == "E. Eto'o Pineda"
+
+    def test_decodes_amp_entity(self):
+        assert decode_api_name("Marcelo &amp; Silva") == "Marcelo & Silva"
+
+    def test_passthrough_clean_name(self):
+        assert decode_api_name("Robert Lewandowski") == "Robert Lewandowski"
+
+    def test_decodes_numeric_entities(self):
+        assert decode_api_name("Cami&#243;n") == "Camión"
+
+    def test_noop_on_plain_name(self):
+        assert decode_api_name("Robert Lewandowski") == "Robert Lewandowski"
 
 
 # ─────────────────────────────────────────────────────────────

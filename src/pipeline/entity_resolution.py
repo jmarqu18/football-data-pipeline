@@ -10,6 +10,7 @@ See docs/entity-resolution-spec.md for the full design specification.
 from __future__ import annotations
 
 import csv
+import html
 import logging
 import re
 from datetime import UTC, datetime
@@ -41,19 +42,40 @@ logger = logging.getLogger(__name__)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+def decode_api_name(name: str) -> str:
+    """Decode HTML entities in an API-Football name string.
+
+    API-Football occasionally returns names with HTML entities
+    (e.g. ``"E. Eto&apos;o Pineda"``).  This function decodes them to
+    their Unicode equivalents before the value is stored in the CLEAN layer.
+
+    Examples:
+        >>> decode_api_name("E. Eto&apos;o Pineda")
+        "E. Eto'o Pineda"
+        >>> decode_api_name("Marcelo &amp; Silva")
+        'Marcelo & Silva'
+    """
+    return html.unescape(name)
+
+
 def normalize_name(name: str) -> str:
     """Normalize a player or team name for comparison.
 
-    Applies: unidecode (strip diacritics) → lowercase → strip →
-    collapse multiple whitespace into single space.
+    Applies: HTML unescape → unidecode (strip diacritics) → lowercase →
+    strip → collapse multiple whitespace into single space.
+
+    HTML entities are unescaped first so that ``"Eto&apos;o"`` and
+    ``"Eto'o"`` compare equal after normalization.
 
     Examples:
         >>> normalize_name("Vinícius Júnior")
         'vinicius junior'
         >>> normalize_name("  Pedro  González   López  ")
         'pedro gonzalez lopez'
+        >>> normalize_name("E. Eto&apos;o Pineda")
+        "e. eto'o pineda"
     """
-    return _WHITESPACE_RE.sub(" ", unidecode(name).lower().strip())
+    return _WHITESPACE_RE.sub(" ", unidecode(html.unescape(name)).lower().strip())
 
 
 def build_name_variants(
@@ -128,10 +150,13 @@ def resolve_teams(
     resolved: list[ResolvedTeam] = []
     unmatched_understat = set(understat_teams)
 
-    # Build normalized lookup for API-Football teams
+    # Build normalized lookup for API-Football teams.
+    # Decode HTML entities once here so that api_name is always clean
+    # when used as canonical_name or api_football_name downstream.
     api_normalized: dict[str, tuple[int, str]] = {}
     for team_id, team_name in api_teams:
-        api_normalized[normalize_name(team_name)] = (team_id, team_name)
+        decoded = decode_api_name(team_name)
+        api_normalized[normalize_name(decoded)] = (team_id, decoded)
 
     # Pass 1: Exact match on normalized name
     for u_team in list(unmatched_understat):
@@ -369,9 +394,10 @@ def resolve_players(
         confidence: float,
         method: str,
     ) -> ResolvedPlayer:
+        decoded_name = decode_api_name(api_p.name)
         return ResolvedPlayer(
-            canonical_name=api_p.name,
-            known_name=u_p.player_name if u_p.player_name != api_p.name else None,
+            canonical_name=decoded_name,
+            known_name=u_p.player_name if u_p.player_name != decoded_name else None,
             api_football_id=api_p.player_id,
             understat_id=u_p.player_id,
             birth_date=api_p.birth_date,
@@ -554,7 +580,7 @@ def resolve_players(
         # Single-source API-Football player → add as resolved with only api_football_id
         resolved.append(
             ResolvedPlayer(
-                canonical_name=api_p.name,
+                canonical_name=decode_api_name(api_p.name),
                 known_name=None,
                 api_football_id=api_p.player_id,
                 understat_id=None,
