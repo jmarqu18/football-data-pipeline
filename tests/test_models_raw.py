@@ -1235,7 +1235,7 @@ class TestRawAPIFootballStandings:
 # ─────────────────────────────────────────────────────────────
 
 
-class TestResolvedTeamMetadata:
+class TestResolvedTeamFields:
     """Tests for the new optional metadata fields on ResolvedTeam."""
 
     def test_resolved_team_accepts_full_metadata(self):

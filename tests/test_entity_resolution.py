@@ -295,6 +295,7 @@ class TestResolveTeams:
         assert resolved.code == "BAR"
         assert resolved.founded == 1899
         assert resolved.venue_name == "Camp Nou"
+        assert resolved.logo_url == "https://example.com/logo.png"
         assert resolved.venue_capacity == 55926
 
 

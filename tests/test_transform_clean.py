@@ -248,7 +248,7 @@ class TestParseTransferType:
 # ─────────────────────────────────────────────────────────────
 
 
-def test_load_raw_api_football_loads_teams_parquet(tmp_path):
+def test_transform_uses_teams_parquet_for_country(tmp_path):
     """teams.parquet from RAW layer is loaded and returned as RawAPIFootballTeam list."""
     import pyarrow as pa
     import pyarrow.parquet as pq
