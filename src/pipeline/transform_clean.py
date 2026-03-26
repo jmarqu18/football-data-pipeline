@@ -501,10 +501,7 @@ def insert_player_profile(
             if height_cm is None and weight_kg is None:
                 continue
             conn.execute(
-                text(
-                    "INSERT INTO player_profile (player_id, height_cm, weight_kg) "
-                    "VALUES (:pid, :height, :weight)"
-                ),
+                text("INSERT INTO player_profile (player_id, height_cm, weight_kg) VALUES (:pid, :height, :weight)"),
                 {"pid": pid, "height": height_cm, "weight": weight_kg},
             )
             inserted += 1
@@ -662,9 +659,7 @@ def run_transform_clean(
 
     # 5. Build understat team lookup for insert helpers (local, not module-level global)
     understat_name_to_api_id: dict[str, int] = {
-        team.understat_name: team.api_football_id
-        for team in resolved_teams
-        if team.understat_name is not None
+        team.understat_name: team.api_football_id for team in resolved_teams if team.understat_name is not None
     }
 
     # 6. Insert into PostgreSQL
@@ -683,9 +678,7 @@ def run_transform_clean(
         "teams": len(team_id_map),
         "players": len(all_player_ids),
     }
-    counts["player_season_stats"] = insert_player_season_stats(
-        engine, stats, af_player_map, team_id_map, season_str
-    )
+    counts["player_season_stats"] = insert_player_season_stats(engine, stats, af_player_map, team_id_map, season_str)
     counts["player_season_advanced"] = insert_player_season_advanced(
         engine, player_season, us_player_map, team_id_map, season_str, understat_name_to_api_id
     )
@@ -706,9 +699,7 @@ def run_transform_clean(
     )
     counts["player_profile"] = insert_player_profile(engine, players, af_player_map)
     counts["player_injuries"] = insert_player_injuries(engine, injuries, af_player_map, team_id_map)
-    counts["player_transfers"] = insert_player_transfers(
-        engine, transfers, af_player_map, team_id_map
-    )
+    counts["player_transfers"] = insert_player_transfers(engine, transfers, af_player_map, team_id_map)
 
     elapsed = time.monotonic() - start
     logger.info(

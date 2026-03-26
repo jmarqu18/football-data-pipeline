@@ -65,17 +65,17 @@ def _make_api_player(
     )
 
 
-_EMPTY_STATS_KWARGS = dict(
-    shots=_APIFootballShots(),
-    goals=_APIFootballGoals(),
-    passes=_APIFootballPasses(),
-    tackles=_APIFootballTackles(),
-    duels=_APIFootballDuels(),
-    dribbles=_APIFootballDribbles(),
-    fouls=_APIFootballFouls(),
-    cards=_APIFootballCards(),
-    penalty=_APIFootballPenalty(),
-)
+_EMPTY_STATS_KWARGS = {
+    "shots": _APIFootballShots(),
+    "goals": _APIFootballGoals(),
+    "passes": _APIFootballPasses(),
+    "tackles": _APIFootballTackles(),
+    "duels": _APIFootballDuels(),
+    "dribbles": _APIFootballDribbles(),
+    "fouls": _APIFootballFouls(),
+    "cards": _APIFootballCards(),
+    "penalty": _APIFootballPenalty(),
+}
 
 
 def _make_api_stats(
@@ -190,17 +190,13 @@ class TestBuildNameVariants:
         assert "jude bellingham" in variants
 
     def test_with_firstname_lastname(self):
-        variants = build_name_variants(
-            "Pedro González López", firstname="Pedro", lastname="González López"
-        )
+        variants = build_name_variants("Pedro González López", firstname="Pedro", lastname="González López")
         assert "pedro gonzalez lopez" in variants
         assert "pedro" in variants
         assert "gonzalez lopez" in variants
 
     def test_no_duplicates(self):
-        variants = build_name_variants(
-            "Pedro González López", firstname="Pedro", lastname="González López"
-        )
+        variants = build_name_variants("Pedro González López", firstname="Pedro", lastname="González López")
         assert len(variants) == len(set(variants))
 
     def test_none_fields_handled(self):
@@ -508,8 +504,7 @@ class TestTwentyPlayers:
 
         correct = actual_matches & _EXPECTED_MATCHES
         assert len(correct) >= 14, (
-            f"Only {len(correct)}/16 correctly resolved (need ≥14). "
-            f"Missing: {_EXPECTED_MATCHES - correct}"
+            f"Only {len(correct)}/16 correctly resolved (need ≥14). Missing: {_EXPECTED_MATCHES - correct}"
         )
 
     def test_no_false_positives(self, twenty_players_fixture):
@@ -533,8 +528,7 @@ class TestTwentyPlayers:
         for p in result.resolved_players:
             if p.api_football_id == 117 and p.understat_id is not None:
                 pytest.fail(
-                    f"Single-source API-Football player was incorrectly matched to "
-                    f"understat_id={p.understat_id}"
+                    f"Single-source API-Football player was incorrectly matched to understat_id={p.understat_id}"
                 )
 
     def test_no_wrong_matches(self, twenty_players_fixture):
@@ -571,8 +565,7 @@ class TestTwentyPlayers:
         koke_resolved = (1008, 108) in statistical_matches
         isco_resolved = (1010, 110) in statistical_matches
         assert koke_resolved or isco_resolved, (
-            "Neither Koke nor Isco resolved via statistical fingerprint. "
-            f"Statistical matches: {statistical_matches}"
+            f"Neither Koke nor Isco resolved via statistical fingerprint. Statistical matches: {statistical_matches}"
         )
 
     def test_exact_match_players(self, twenty_players_fixture):
@@ -584,9 +577,7 @@ class TestTwentyPlayers:
             twenty_players_fixture["resolved_teams"],
             twenty_players_fixture["transfers"],
         )
-        exact_ids = {
-            p.understat_id for p in result.resolved_players if p.resolution_method == "exact"
-        }
+        exact_ids = {p.understat_id for p in result.resolved_players if p.resolution_method == "exact"}
         # Bellingham, Lewandowski, Griezmann, Oblak should be exact
         for uid in [1001, 1002, 1007, 1009]:
             assert uid in exact_ids, f"Understat player {uid} should be exact match"
@@ -619,9 +610,7 @@ class TestTwentyPlayers:
         )
         unresolved_ids = {u.player_id for u in result.unresolved}
         # "Only In Understat" (1016) should be unresolved
-        assert 1016 in unresolved_ids, (
-            "'Zinedine Phantom' (single-source) should be in unresolved list"
-        )
+        assert 1016 in unresolved_ids, "'Zinedine Phantom' (single-source) should be in unresolved list"
 
 
 class TestUnresolvedReport:

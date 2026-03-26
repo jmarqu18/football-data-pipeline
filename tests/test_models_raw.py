@@ -42,42 +42,42 @@ def _load_fixture(name: str) -> list[dict]:
 
 
 # Reusable dicts for building valid sub-models inline.
-_VALID_GAMES = dict(
-    appearances=28,
-    lineups=25,
-    minutes=2100,
-    number=8,
-    position="Midfielder",
-    rating="7.342857",
-    captain=False,
-)
-_VALID_SHOTS = dict(total=32, on=14)
-_VALID_GOALS = dict(total=5, conceded=0, assists=7, saves=None)
-_VALID_PASSES = dict(total=1850, key=42, accuracy=89)
-_VALID_TACKLES = dict(total=35, blocks=3, interceptions=22)
-_VALID_DUELS = dict(total=195, won=105)
-_VALID_DRIBBLES = dict(attempts=55, success=38, past=None)
-_VALID_FOULS = dict(drawn=30, committed=15)
-_VALID_CARDS = dict(yellow=4, yellowred=0, red=0)
-_VALID_PENALTY = dict(won=None, committed=None, scored=0, missed=0, saved=None)
+_VALID_GAMES = {
+    "appearances": 28,
+    "lineups": 25,
+    "minutes": 2100,
+    "number": 8,
+    "position": "Midfielder",
+    "rating": "7.342857",
+    "captain": False,
+}
+_VALID_SHOTS = {"total": 32, "on": 14}
+_VALID_GOALS = {"total": 5, "conceded": 0, "assists": 7, "saves": None}
+_VALID_PASSES = {"total": 1850, "key": 42, "accuracy": 89}
+_VALID_TACKLES = {"total": 35, "blocks": 3, "interceptions": 22}
+_VALID_DUELS = {"total": 195, "won": 105}
+_VALID_DRIBBLES = {"attempts": 55, "success": 38, "past": None}
+_VALID_FOULS = {"drawn": 30, "committed": 15}
+_VALID_CARDS = {"yellow": 4, "yellowred": 0, "red": 0}
+_VALID_PENALTY = {"won": None, "committed": None, "scored": 0, "missed": 0, "saved": None}
 
-_VALID_PLAYER_STATS = dict(
-    player_id=1100,
-    team_id=529,
-    team_name="Barcelona",
-    league_id=140,
-    season=2024,
-    games=_VALID_GAMES,
-    shots=_VALID_SHOTS,
-    goals=_VALID_GOALS,
-    passes=_VALID_PASSES,
-    tackles=_VALID_TACKLES,
-    duels=_VALID_DUELS,
-    dribbles=_VALID_DRIBBLES,
-    fouls=_VALID_FOULS,
-    cards=_VALID_CARDS,
-    penalty=_VALID_PENALTY,
-)
+_VALID_PLAYER_STATS = {
+    "player_id": 1100,
+    "team_id": 529,
+    "team_name": "Barcelona",
+    "league_id": 140,
+    "season": 2024,
+    "games": _VALID_GAMES,
+    "shots": _VALID_SHOTS,
+    "goals": _VALID_GOALS,
+    "passes": _VALID_PASSES,
+    "tackles": _VALID_TACKLES,
+    "duels": _VALID_DUELS,
+    "dribbles": _VALID_DRIBBLES,
+    "fouls": _VALID_FOULS,
+    "cards": _VALID_CARDS,
+    "penalty": _VALID_PENALTY,
+}
 
 
 # ─────────────────────────────────────────────────────────────

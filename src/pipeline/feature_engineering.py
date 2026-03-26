@@ -126,23 +126,17 @@ def compute_xg_features(per90_df: pd.DataFrame, advanced_df: pd.DataFrame) -> pd
 
     # Merge per90_df with advanced on (player_id, team_id)
     merged = per90_df.merge(
-        adv[
-            ["player_id", "team_id", "xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"]
-        ],
+        adv[["player_id", "team_id", "xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"]],
         on=["player_id", "team_id"],
         how="left",
     )
 
     nineties = merged["minutes"] / 90.0
-    merged["xg_overperformance"] = np.where(
-        merged["xg"].notna(), merged["goals"] - merged["xg"], np.nan
-    )
+    merged["xg_overperformance"] = np.where(merged["xg"].notna(), merged["goals"] - merged["xg"], np.nan)
     merged["npxg_per_90"] = np.where(merged["npxg"].notna(), merged["npxg"] / nineties, np.nan)
     merged["xa_per_90"] = np.where(merged["xa"].notna(), merged["xa"] / nineties, np.nan)
     merged["xg_chain_share"] = _safe_divide(merged["xg_chain"], merged["team_xg_chain"])
-    merged["xg_buildup_per_90"] = np.where(
-        merged["xg_buildup"].notna(), merged["xg_buildup"] / nineties, np.nan
-    )
+    merged["xg_buildup_per_90"] = np.where(merged["xg_buildup"].notna(), merged["xg_buildup"] / nineties, np.nan)
 
     merged = merged.drop(columns=["xg", "xa", "npxg", "xg_chain", "xg_buildup", "team_xg_chain"])
 
@@ -247,9 +241,7 @@ def compute_scouting_features(
             .reset_index()
         )
         ref_ts = pd.Timestamp(reference_date)
-        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(
-            float
-        )
+        inj_agg["days_since_last_injury"] = (ref_ts - inj_agg["last_injury_date"]).dt.days.astype(float)
         inj_agg = inj_agg.drop(columns=["last_injury_date"])
     else:
         inj_agg = pd.DataFrame(
@@ -297,10 +289,7 @@ def compute_percentiles(df: pd.DataFrame) -> pd.DataFrame:
         if metric not in result.columns:
             result[pct_col] = np.nan
             continue
-        result[pct_col] = (
-            result.groupby("position", group_keys=False)[metric].rank(pct=True, na_option="keep")
-            * 100
-        )
+        result[pct_col] = result.groupby("position", group_keys=False)[metric].rank(pct=True, na_option="keep") * 100
     logger.info(
         "Percentiles computed for %d stints across %d metrics",
         len(result),

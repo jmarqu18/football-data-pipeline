@@ -227,12 +227,8 @@ def test_xg_features_basic():
     # Team has 2 players: player 1 with xg_chain=12, player 99 with xg_chain=8
     advanced_df = pd.DataFrame(
         [
-            _make_advanced_row(
-                player_id=1, xg=4.5, xg_chain=12.0, xg_buildup=6.0, xa=7.2, npxg=4.0
-            ),
-            _make_advanced_row(
-                player_id=99, team_id=3, xg_chain=8.0, xg=0.5, xa=0.2, npxg=0.4, xg_buildup=2.0
-            ),
+            _make_advanced_row(player_id=1, xg=4.5, xg_chain=12.0, xg_buildup=6.0, xa=7.2, npxg=4.0),
+            _make_advanced_row(player_id=99, team_id=3, xg_chain=8.0, xg=0.5, xa=0.2, npxg=0.4, xg_buildup=2.0),
         ]
     )
     result = compute_xg_features(per90_df, advanced_df)
@@ -248,9 +244,7 @@ def test_xg_features_missing_understat():
     """Player with no Understat row should have None for all xG fields."""
     per90_df = pd.DataFrame([_make_stats_row(player_id=1, goals=5, minutes=2700, starts=30)])
     per90_df = compute_per90_features(per90_df)
-    advanced_df = pd.DataFrame(
-        columns=["player_id", "team_id", "season", "xg", "xa", "npxg", "xg_chain", "xg_buildup"]
-    )
+    advanced_df = pd.DataFrame(columns=["player_id", "team_id", "season", "xg", "xa", "npxg", "xg_chain", "xg_buildup"])
     result = compute_xg_features(per90_df, advanced_df)
     row = result[result["player_id"] == 1].iloc[0]
     assert pd.isna(row["xg_overperformance"])

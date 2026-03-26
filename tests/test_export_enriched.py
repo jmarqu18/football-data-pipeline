@@ -103,9 +103,7 @@ def _make_enriched_engine():
                 " 101, 201, '2002-11-25', 'Spanish')"
             )
         )
-        conn.execute(
-            text("INSERT INTO teams VALUES (3, 'FC Barcelona', 'https://logo.url/barca.png')")
-        )
+        conn.execute(text("INSERT INTO teams VALUES (3, 'FC Barcelona', 'https://logo.url/barca.png')"))
         conn.execute(text("INSERT INTO player_profile VALUES (1, 174, 68)"))
         conn.execute(
             text(
@@ -215,10 +213,7 @@ def test_run_export_enriched_writes_tables(tmp_path):
     assert stats["shots_written"] == 1
 
     with sqlite3.connect(output_path) as conn:
-        tables = {
-            r[0]
-            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "player_season_stats_flat" in tables
         assert "player_shots" in tables
 

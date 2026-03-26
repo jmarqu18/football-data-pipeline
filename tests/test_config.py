@@ -31,25 +31,25 @@ from pipeline.config import (
 # Helpers
 # ─────────────────────────────────────────────────────────────
 
-_VALID_RATE_LIMIT = dict(max_calls_per_day=100, delay_between_calls=1.0)
+_VALID_RATE_LIMIT = {"max_calls_per_day": 100, "delay_between_calls": 1.0}
 
-_VALID_API_FOOTBALL = dict(
-    league_id=140,
-    season=2024,
-    endpoints=["players_stats", "injuries", "transfers"],
-    cache_dir="data/cache/api_football",
-    cache_ttl_hours=168,
-    rate_limit=_VALID_RATE_LIMIT,
-)
+_VALID_API_FOOTBALL = {
+    "league_id": 140,
+    "season": 2024,
+    "endpoints": ["players_stats", "injuries", "transfers"],
+    "cache_dir": "data/cache/api_football",
+    "cache_ttl_hours": 168,
+    "rate_limit": _VALID_RATE_LIMIT,
+}
 
-_VALID_UNDERSTAT = dict(league="La Liga", season="2024/2025")
+_VALID_UNDERSTAT = {"league": "La Liga", "season": "2024/2025"}
 
-_VALID_SOURCES = dict(
-    api_football=_VALID_API_FOOTBALL,
-    understat=_VALID_UNDERSTAT,
-)
+_VALID_SOURCES = {
+    "api_football": _VALID_API_FOOTBALL,
+    "understat": _VALID_UNDERSTAT,
+}
 
-_VALID_CONFIG_DICT = dict(sources=_VALID_SOURCES)
+_VALID_CONFIG_DICT = {"sources": _VALID_SOURCES}
 
 _VALID_YAML = """\
 sources:
@@ -381,9 +381,7 @@ class TestGetConfig:
         assert isinstance(cfg, IngestionConfig)
         assert cfg.sources.api_football.league_id == 140
 
-    def test_same_object_returned_on_second_call(
-        self, tmp_path: Path, reset_config_singleton: None
-    ):
+    def test_same_object_returned_on_second_call(self, tmp_path: Path, reset_config_singleton: None):
         """Two calls to get_config() return the identical object (singleton)."""
         config_file = tmp_path / "ingestion.yaml"
         config_file.write_text(_VALID_YAML, encoding="utf-8")
