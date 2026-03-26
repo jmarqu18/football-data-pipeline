@@ -7,6 +7,7 @@ Each test uses realistic data modelled from the actual sources
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -592,9 +593,16 @@ class TestRawAPIFootballTeam:
 
     def test_json_roundtrip(self):
         team = RawAPIFootballTeam(
-            team_id=529, name="Barcelona", code="BAR", country="Spain",
-            founded=1899, national=False, venue_name="Camp Nou",
-            venue_city="Barcelona", venue_capacity=55926, venue_surface="grass",
+            team_id=529,
+            name="Barcelona",
+            code="BAR",
+            country="Spain",
+            founded=1899,
+            national=False,
+            venue_name="Camp Nou",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
         )
         restored = RawAPIFootballTeam.model_validate_json(team.model_dump_json())
         assert restored == team
@@ -1232,7 +1240,7 @@ class TestResolvedTeamMetadata:
 
     def test_resolved_team_accepts_full_metadata(self):
         """ResolvedTeam can be constructed with all new metadata fields."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from pipeline.models.clean import ResolvedTeam
 
@@ -1250,7 +1258,7 @@ class TestResolvedTeamMetadata:
             venue_capacity=55926,
             venue_surface="grass",
             venue_image_url="https://media.api-sports.io/football/venues/529.png",
-            resolved_at=datetime(2025, 3, 1, tzinfo=timezone.utc),
+            resolved_at=datetime(2025, 3, 1, tzinfo=UTC),
         )
 
         assert team.country == "Spain"

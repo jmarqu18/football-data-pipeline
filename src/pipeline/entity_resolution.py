@@ -21,6 +21,7 @@ from unidecode import unidecode
 
 from pipeline.models.clean import (
     CandidateMatch,
+    ResolutionMethod,
     ResolutionResult,
     ResolvedPlayer,
     ResolvedTeam,
@@ -194,14 +195,10 @@ def resolve_teams(
         norm_u = normalize_name(u_team)
         if norm_u in api_normalized:
             api_team = api_normalized[norm_u]
-            resolved.append(
-                _build_resolved_team(api_team, u_team, 1.0, "exact", now)
-            )
+            resolved.append(_build_resolved_team(api_team, u_team, 1.0, "exact", now))
             unmatched_understat.discard(u_team)
             del api_normalized[norm_u]
-            logger.debug(
-                "Team exact match: '%s' ↔ '%s'", u_team, decode_api_name(api_team.name)
-            )
+            logger.debug("Team exact match: '%s' ↔ '%s'", u_team, decode_api_name(api_team.name))
 
     # Pass 2: Fuzzy match
     for u_team in list(unmatched_understat):
@@ -215,9 +212,7 @@ def resolve_teams(
                 best_api_key = api_key
         if best_api_key is not None and best_score >= _TEAM_FUZZY_THRESHOLD:
             api_team = api_normalized[best_api_key]
-            resolved.append(
-                _build_resolved_team(api_team, u_team, 0.85, "fuzzy", now)
-            )
+            resolved.append(_build_resolved_team(api_team, u_team, 0.85, "fuzzy", now))
             unmatched_understat.discard(u_team)
             del api_normalized[best_api_key]
             logger.debug(
@@ -234,9 +229,7 @@ def resolve_teams(
     resolved_api_ids = {r.api_football_id for r in resolved}
     for _api_key, api_team in api_normalized.items():
         if api_team.team_id not in resolved_api_ids:
-            resolved.append(
-                _build_resolved_team(api_team, None, None, None, now)
-            )
+            resolved.append(_build_resolved_team(api_team, None, None, None, now))
 
     exact_count = sum(1 for r in resolved if r.resolution_method == "exact")
     fuzzy_count = sum(1 for r in resolved if r.resolution_method == "fuzzy")

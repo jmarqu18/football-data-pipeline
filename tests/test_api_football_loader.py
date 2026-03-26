@@ -22,7 +22,6 @@ from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
-    RawAPIFootballTeam,
     RawAPIFootballTransfer,
 )
 

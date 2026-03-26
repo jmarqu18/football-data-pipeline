@@ -254,7 +254,11 @@ def test_load_raw_api_football_loads_teams_parquet(tmp_path):
     import pyarrow.parquet as pq
 
     from pipeline.models.raw import (
+        RawAPIFootballInjury,
+        RawAPIFootballPlayer,
+        RawAPIFootballPlayerStats,
         RawAPIFootballTeam,
+        RawAPIFootballTransfer,
         _APIFootballCards,
         _APIFootballDribbles,
         _APIFootballDuels,
@@ -265,10 +269,6 @@ def test_load_raw_api_football_loads_teams_parquet(tmp_path):
         _APIFootballPenalty,
         _APIFootballShots,
         _APIFootballTackles,
-        RawAPIFootballPlayer,
-        RawAPIFootballPlayerStats,
-        RawAPIFootballInjury,
-        RawAPIFootballTransfer,
     )
 
     api_dir = tmp_path / "api_football"
@@ -287,9 +287,7 @@ def test_load_raw_api_football_loads_teams_parquet(tmp_path):
 
     # Write empty parquet files for the other entities that load_raw_api_football expects
     empty_player = RawAPIFootballPlayer(player_id=1, name="Test")
-    pq.write_table(
-        pa.Table.from_pylist([empty_player.model_dump()]), api_dir / "players.parquet"
-    )
+    pq.write_table(pa.Table.from_pylist([empty_player.model_dump()]), api_dir / "players.parquet")
 
     _empty_stats_kwargs = dict(
         shots=_APIFootballShots(),
@@ -325,9 +323,7 @@ def test_load_raw_api_football_loads_teams_parquet(tmp_path):
         type="Muscular",
         date="2024-11-01",
     )
-    pq.write_table(
-        pa.Table.from_pylist([empty_injury.model_dump()]), api_dir / "injuries.parquet"
-    )
+    pq.write_table(pa.Table.from_pylist([empty_injury.model_dump()]), api_dir / "injuries.parquet")
 
     empty_transfer = RawAPIFootballTransfer(player_id=1, player_name="Test")
     pq.write_table(

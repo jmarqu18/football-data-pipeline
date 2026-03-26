@@ -110,9 +110,7 @@ def load_raw_api_football(
             except ValidationError as exc:
                 logger.warning("Rejected raw team record: %s", exc)
     else:
-        logger.warning(
-            "teams.parquet not found at %s — team metadata will be empty", teams_path
-        )
+        logger.warning("teams.parquet not found at %s — team metadata will be empty", teams_path)
 
     return players, stats, injuries, transfers, raw_teams
 
@@ -642,9 +640,7 @@ def run_transform_clean(
 
     # 1. Load RAW data
     logger.info("Loading RAW Parquet files from %s", raw_dir)
-    players, stats, injuries, transfers, raw_teams = load_raw_api_football(
-        raw_dir / "api_football"
-    )
+    players, stats, injuries, transfers, raw_teams = load_raw_api_football(raw_dir / "api_football")
     shots, player_season = load_raw_understat(raw_dir / "understat")
 
     # 2. Extract unique teams
