@@ -192,14 +192,31 @@ def insert_teams(
                 text(
                     "INSERT INTO teams "
                     "(api_football_id, understat_name, canonical_name, "
+                    "country, logo_url, code, founded, "
+                    "venue_name, venue_address, venue_city, "
+                    "venue_capacity, venue_surface, venue_image_url, "
                     "resolution_confidence, resolution_method, resolved_at) "
-                    "VALUES (:af_id, :u_name, :canon, :conf, :method, :resolved_at) "
+                    "VALUES (:af_id, :u_name, :canon, "
+                    ":country, :logo_url, :code, :founded, "
+                    ":venue_name, :venue_address, :venue_city, "
+                    ":venue_capacity, :venue_surface, :venue_image_url, "
+                    ":conf, :method, :resolved_at) "
                     "RETURNING team_id"
                 ),
                 {
                     "af_id": team.api_football_id,
                     "u_name": team.understat_name,
                     "canon": team.canonical_name,
+                    "country": team.country,
+                    "logo_url": team.logo_url,
+                    "code": team.code,
+                    "founded": team.founded,
+                    "venue_name": team.venue_name,
+                    "venue_address": team.venue_address,
+                    "venue_city": team.venue_city,
+                    "venue_capacity": team.venue_capacity,
+                    "venue_surface": team.venue_surface,
+                    "venue_image_url": team.venue_image_url,
                     "conf": team.resolution_confidence,
                     "method": team.resolution_method,
                     "resolved_at": team.resolved_at,
