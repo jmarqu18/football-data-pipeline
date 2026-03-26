@@ -1,4 +1,4 @@
-"""Unit tests for RAW layer Pydantic models.
+"""Unit tests for RAW layer Pydantic models and selected CLEAN layer models.
 
 Each test uses realistic data modelled from the actual sources
 (API-Football, Understat) to validate schema and basic types.
@@ -1220,3 +1220,67 @@ class TestRawAPIFootballStandings:
         )
         restored = RawAPIFootballStandings.model_validate_json(s.model_dump_json())
         assert restored == s
+
+
+# ─────────────────────────────────────────────────────────────
+# ResolvedTeam (CLEAN layer) — metadata fields
+# ─────────────────────────────────────────────────────────────
+
+
+class TestResolvedTeamMetadata:
+    """Tests for the new optional metadata fields on ResolvedTeam."""
+
+    def test_resolved_team_accepts_full_metadata(self):
+        """ResolvedTeam can be constructed with all new metadata fields."""
+        from datetime import datetime, timezone
+
+        from pipeline.models.clean import ResolvedTeam
+
+        team = ResolvedTeam(
+            canonical_name="Barcelona",
+            api_football_id=529,
+            api_football_name="Barcelona",
+            country="Spain",
+            logo_url="https://media.api-sports.io/football/teams/529.png",
+            code="BAR",
+            founded=1899,
+            venue_name="Camp Nou",
+            venue_address="Carrer d'Arístides Maillol, Barcelona",
+            venue_city="Barcelona",
+            venue_capacity=55926,
+            venue_surface="grass",
+            venue_image_url="https://media.api-sports.io/football/venues/529.png",
+            resolved_at=datetime(2025, 3, 1, tzinfo=timezone.utc),
+        )
+
+        assert team.country == "Spain"
+        assert team.logo_url == "https://media.api-sports.io/football/teams/529.png"
+        assert team.code == "BAR"
+        assert team.founded == 1899
+        assert team.venue_name == "Camp Nou"
+        assert team.venue_address == "Carrer d'Arístides Maillol, Barcelona"
+        assert team.venue_city == "Barcelona"
+        assert team.venue_capacity == 55926
+        assert team.venue_surface == "grass"
+        assert team.venue_image_url == "https://media.api-sports.io/football/venues/529.png"
+
+    def test_resolved_team_metadata_all_nullable(self):
+        """ResolvedTeam can be constructed without any new metadata fields."""
+        from pipeline.models.clean import ResolvedTeam
+
+        team = ResolvedTeam(
+            canonical_name="Real Madrid",
+            api_football_id=541,
+            api_football_name="Real Madrid",
+        )
+
+        assert team.country is None
+        assert team.logo_url is None
+        assert team.code is None
+        assert team.founded is None
+        assert team.venue_name is None
+        assert team.venue_address is None
+        assert team.venue_city is None
+        assert team.venue_capacity is None
+        assert team.venue_surface is None
+        assert team.venue_image_url is None
