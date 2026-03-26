@@ -12,6 +12,7 @@ __pycache__/
 .claude
 .agent
 .kilo
+**/plans/
 
 # Environment
 .env

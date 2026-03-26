@@ -119,6 +119,21 @@ class TestShotExtraction:
         shot = RawUnderstatShot.model_validate(extracted)
         assert shot.body_part is None
 
+    def test_extract_shot_pandas_na_converted_to_none(self):
+        """pd.NA from convert_dtypes() is converted to None before Pydantic validation."""
+        import pandas as pd
+
+        row = _load_fixture("understat_shots_dataframe.json")[0].copy()
+        row["situation"] = pd.NA
+        row["body_part"] = pd.NA
+        extracted = UnderstatLoader._extract_shot(row)
+
+        assert extracted["situation"] is None
+        assert extracted["body_part"] is None
+        shot = RawUnderstatShot.model_validate(extracted)
+        assert shot.situation is None
+        assert shot.body_part is None
+
 
 # ─────────────────────────────────────────────────────────────
 # Player season extraction
@@ -324,10 +339,10 @@ class TestIngestAll:
         assert (tmp_path / "shots.parquet").exists()
         assert (tmp_path / "player_season.parquet").exists()
 
-    def test_ingest_all_returns_counts(self):
+    def test_ingest_all_returns_counts(self, tmp_path: Path):
         """Return dict has correct keys and counts."""
         loader = UnderstatLoader(_make_config(), client=_mock_client())
-        counts = loader.ingest_all()
+        counts = loader.ingest_all(output_dir=tmp_path)
 
         assert counts["shots"] == 3
         assert counts["player_season"] == 2
