@@ -45,8 +45,8 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./sql/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
-      - ./sql/init.sql:/opt/init.sql:ro
+      - ./config/sql/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./config/sql/init.sql:/opt/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
       interval: 10s
@@ -135,7 +135,7 @@ services:
       - "8001:8001"
     volumes:
       - ./data:/opt/airflow/data
-      - ./datasette:/opt/airflow/datasette:ro
+      - ./config/datasette:/opt/airflow/datasette:ro
     restart: unless-stopped
 
 # ── Volúmenes ─────────────────────────────────────────────────────────────────
