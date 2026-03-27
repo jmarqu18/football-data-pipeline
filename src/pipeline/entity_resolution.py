@@ -252,6 +252,7 @@ _PLAYER_CROSS_TEAM_THRESHOLD = 0.75
 _CONFLICT_THRESHOLD = 0.05
 _STAT_GAMES_TOLERANCE = 3
 _STAT_MINUTES_TOLERANCE_PCT = 0.20
+_PASS4_NAME_FLOOR = 0.50  # minimum name similarity required for statistical match
 
 
 def _build_team_mapping(
@@ -512,6 +513,9 @@ def resolve_players(
         candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
         stat_matches: list[int] = []
         for api_id in candidates_in_team:
+            variants = api_variants_map.get(api_id, [])
+            if best_match_score(u_player.player_name, variants) < _PASS4_NAME_FLOOR:
+                continue
             stats_list = api_stats_by_player.get(api_id, [])
             for stat in stats_list:
                 if stat.team_id == u_team_id and _stats_match(
