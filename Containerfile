@@ -32,8 +32,8 @@ RUN python -c 'import tls_requests; tls_requests.get("https://cloudflare.com", t
 COPY --chown=airflow:root src/       /opt/airflow/src/
 COPY --chown=airflow:root dags/      /opt/airflow/dags/
 COPY --chown=airflow:root config/    /opt/airflow/config/
-COPY --chown=airflow:root datasette/ /opt/airflow/datasette/
-COPY --chown=airflow:root sql/       /opt/airflow/sql/
+COPY --chown=airflow:root config/datasette/ /opt/airflow/datasette/
+COPY --chown=airflow:root config/sql/       /opt/airflow/sql/
 
 # ── Data directories ──────────────────────────────────────────────────────────
 # DAGs resolve data paths via Path(__file__).parents[1] / "data" / ...
