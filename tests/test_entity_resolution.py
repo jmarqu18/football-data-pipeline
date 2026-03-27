@@ -12,10 +12,12 @@ Covers:
 from __future__ import annotations
 
 import csv
+from datetime import UTC, datetime
 
 import pytest
 
 from pipeline.entity_resolution import (
+    _get_top_candidates,
     best_match_score,
     build_name_variants,
     decode_api_name,
@@ -24,6 +26,7 @@ from pipeline.entity_resolution import (
     resolve_teams,
     write_unresolved_report,
 )
+from pipeline.models.clean import ResolvedTeam
 from pipeline.models.raw import (
     RawAPIFootballPlayer,
     RawAPIFootballPlayerStats,
@@ -62,6 +65,22 @@ def _make_api_player(
         lastname=lastname,
         birth_date=birth_date,
         nationality=nationality,
+    )
+
+
+def _make_resolved_team(
+    api_id: int,
+    api_name: str,
+    understat_name: str | None = None,
+) -> ResolvedTeam:
+    return ResolvedTeam(
+        canonical_name=api_name,
+        api_football_id=api_id,
+        api_football_name=api_name,
+        understat_name=understat_name,
+        resolution_confidence=1.0 if understat_name else None,
+        resolution_method="exact" if understat_name else None,
+        resolved_at=datetime.now(tz=UTC),
     )
 
 
@@ -635,3 +654,139 @@ class TestUnresolvedReport:
         # Check CSV header
         assert "source" in reader.fieldnames
         assert "fuzzy_score" in reader.fieldnames
+
+
+# ─────────────────────────────────────────────────────────────
+# Pass 4 name floor
+# ─────────────────────────────────────────────────────────────
+
+
+def test_pass4_rejects_statistically_similar_but_unrelated_name() -> None:
+    """Pass 4 must NOT match players whose names are completely unrelated.
+
+    Reproduces the Gallagher ↔ Giménez false positive:
+    - Understat 'Connor Gallagher' plays 25 games / 2100 min for Atletico.
+    - API-Football 'J. Gimenez' (Jose Maria Gimenez de Vargas) plays
+      24 games / 2050 min for Atletico.
+    - Stats are within tolerance (±3 games, ±20% minutes).
+    - Without a name floor, Pass 4 incorrectly links them.
+    - With _PASS4_NAME_FLOOR = 0.35, the match must be rejected.
+    """
+    team = _make_resolved_team(api_id=530, api_name="Atletico Madrid", understat_name="Atletico Madrid")
+
+    api_player = _make_api_player(31, "J. Gimenez", firstname="Jose Maria", lastname="Gimenez de Vargas")
+    api_stats = _make_api_stats(31, 530, "Atletico Madrid", appearances=24, minutes=2050)
+
+    understat_gallagher = _make_understat_player(9999, "Connor Gallagher", "Atletico Madrid", games=25, minutes=2100)
+
+    result = resolve_players(
+        api_players=[api_player],
+        api_stats=[api_stats],
+        understat_players=[understat_gallagher],
+        resolved_teams=[team],
+        raw_transfers=[],
+    )
+
+    # Gallagher must be unresolved — not matched to Gimenez
+    assert len(result.unresolved) == 1
+    assert result.unresolved[0].player_name == "Connor Gallagher"
+
+    # Gimenez must appear as a single-source API-Football player (no understat_id)
+    gimenez_in_resolved = [p for p in result.resolved_players if p.api_football_id == 31]
+    assert len(gimenez_in_resolved) == 1
+    assert gimenez_in_resolved[0].understat_id is None
+
+
+def test_pass4_floor_allows_plausible_and_blocks_unrelated() -> None:
+    """Verify _PASS4_NAME_FLOOR threshold allows plausible names and blocks unrelated ones.
+
+    Tests the threshold value directly via best_match_score, since any
+    realistic name pair with a shared surname resolves in Pass 1 or 2
+    before reaching Pass 4 (making end-to-end regression testing vacuous).
+
+    Plausible pair: 'Gimenez' (Understat) vs 'J. Gimenez' (API-Football).
+    These share the same underlying identity and score above the floor.
+
+    Unrelated pair: 'Connor Gallagher' vs 'J. Gimenez' (the false positive
+    this fix is designed to prevent). Score is well below the floor.
+    """
+    from pipeline.entity_resolution import _PASS4_NAME_FLOOR
+
+    gimenez_variants = build_name_variants("J. Gimenez", "Jose Maria", "Gimenez de Vargas")
+
+    # Plausible: same player, just abbreviated name → must be above floor
+    plausible_score = best_match_score("Gimenez", gimenez_variants)
+    assert plausible_score >= _PASS4_NAME_FLOOR, (
+        f"'Gimenez' should pass the name floor against 'J. Gimenez' variants, got {plausible_score:.3f}"
+    )
+
+    # Unrelated: completely different player → must be below floor
+    gallagher_score = best_match_score("Connor Gallagher", gimenez_variants)
+    assert gallagher_score < _PASS4_NAME_FLOOR, (
+        f"'Connor Gallagher' should be blocked by name floor, got {gallagher_score:.3f}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# Team-aware candidate ranking
+# ─────────────────────────────────────────────────────────────
+
+
+def test_get_top_candidates_same_team_ranked_first() -> None:
+    """Same-team candidates must rank before cross-team candidates.
+
+    Reproduces the Arnaut Danjuma Groeneveld case:
+    'Arnau Coromina' and 'Arnau Ortiz' (other teams) score equally high
+    via partial_ratio because they share the prefix 'arnau'.
+    'A. Danjuma' (Girona) also scores high but was ranked 3rd.
+    With preferred_team_id=19, A. Danjuma must appear first.
+    """
+    girona_id = 19
+    other_team_id = 100
+
+    arnau_coromina = _make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina")
+    arnau_ortiz = _make_api_player(183948, "Arnau Ortiz", firstname="Arnau", lastname="Ortiz")
+    a_danjuma = _make_api_player(83, "A. Danjuma", firstname="Arnaut", lastname="Danjuma Groeneveld")
+
+    remaining_api = {
+        490984: (arnau_coromina, build_name_variants("Arnau Coromina", "Arnau", "Coromina")),
+        183948: (arnau_ortiz, build_name_variants("Arnau Ortiz", "Arnau", "Ortiz")),
+        83: (a_danjuma, build_name_variants("A. Danjuma", "Arnaut", "Danjuma Groeneveld")),
+    }
+
+    api_by_team = {
+        girona_id: {83},
+        other_team_id: {490984, 183948},
+    }
+
+    candidates = _get_top_candidates(
+        understat_name="Arnaut Danjuma Groeneveld",
+        api_players=remaining_api,
+        preferred_team_id=girona_id,
+        api_by_team=api_by_team,
+        n=3,
+    )
+
+    assert len(candidates) >= 1
+    assert candidates[0].candidate_source_id == 83, (
+        f"Expected A. Danjuma (id=83) first, got {candidates[0].candidate_name} (id={candidates[0].candidate_source_id})"
+    )
+
+
+def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
+    """When preferred_team_id is None, original behaviour is preserved."""
+    arnau_coromina = _make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina")
+    remaining_api = {
+        490984: (arnau_coromina, build_name_variants("Arnau Coromina", "Arnau", "Coromina")),
+    }
+
+    candidates = _get_top_candidates(
+        understat_name="Arnau Coromina",
+        api_players=remaining_api,
+        preferred_team_id=None,
+        api_by_team={},
+        n=3,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_source_id == 490984

@@ -154,7 +154,7 @@ make up
 
 Arranca 5 servicios en segundo plano: PostgreSQL 18, Airflow webserver, Airflow scheduler, Airflow DAG processor y Datasette. La salida confirma las URLs:
 
-```
+```text
 ✓  Stack levantado
    Airflow UI  →  http://localhost:8080  (admin / admin)
    Datasette   →  http://localhost:8001

@@ -252,6 +252,7 @@ _PLAYER_CROSS_TEAM_THRESHOLD = 0.75
 _CONFLICT_THRESHOLD = 0.05
 _STAT_GAMES_TOLERANCE = 3
 _STAT_MINUTES_TOLERANCE_PCT = 0.20
+_PASS4_NAME_FLOOR = 0.50  # minimum name similarity required for statistical match
 
 
 def _build_team_mapping(
@@ -324,14 +325,35 @@ def _stats_match(
 def _get_top_candidates(
     understat_name: str,
     api_players: dict[int, tuple[RawAPIFootballPlayer, list[str]]],
+    preferred_team_id: int | None = None,
+    api_by_team: dict[int, set[int]] | None = None,
     n: int = 3,
 ) -> list[CandidateMatch]:
-    """Get top-N best fuzzy match candidates for an unresolved Understat player."""
-    scores: list[tuple[float, int, str]] = []
+    """Get top-N best fuzzy match candidates for an unresolved Understat player.
+
+    When ``preferred_team_id`` and ``api_by_team`` are provided, candidates
+    from the player's own team are ranked before cross-team candidates,
+    making the diagnostic report easier to act on.
+    """
+    same_team_ids: set[int] = set()
+    if preferred_team_id is not None and api_by_team is not None:
+        same_team_ids = api_by_team.get(preferred_team_id, set())
+
+    same_team: list[tuple[float, int, str]] = []
+    cross_team: list[tuple[float, int, str]] = []
+
     for api_id, (api_player, variants) in api_players.items():
         score = best_match_score(understat_name, variants)
-        scores.append((score, api_id, api_player.name))
-    scores.sort(reverse=True)
+        entry = (score, api_id, api_player.name)
+        if api_id in same_team_ids:
+            same_team.append(entry)
+        else:
+            cross_team.append(entry)
+
+    same_team.sort(reverse=True)
+    cross_team.sort(reverse=True)
+
+    combined = same_team[:n] + cross_team[: max(0, n - len(same_team))]
     return [
         CandidateMatch(
             candidate_name=name,
@@ -339,7 +361,7 @@ def _get_top_candidates(
             candidate_source_id=api_id,
             fuzzy_score=round(score, 4),
         )
-        for score, api_id, name in scores[:n]
+        for score, api_id, name in combined[:n]
     ]
 
 
@@ -512,6 +534,9 @@ def resolve_players(
         candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
         stat_matches: list[int] = []
         for api_id in candidates_in_team:
+            variants = api_variants_map.get(api_id, [])
+            if best_match_score(u_player.player_name, variants) < _PASS4_NAME_FLOOR:
+                continue
             stats_list = api_stats_by_player.get(api_id, [])
             for stat in stats_list:
                 if stat.team_id == u_team_id and _stats_match(
@@ -553,7 +578,13 @@ def resolve_players(
 
     for u_player in understat_players:
         if u_player.player_id not in matched_understat:
-            top = _get_top_candidates(u_player.player_name, remaining_api)
+            u_team_id_for_report = team_mapping.get(normalize_name(u_player.team))
+            top = _get_top_candidates(
+                u_player.player_name,
+                remaining_api,
+                preferred_team_id=u_team_id_for_report,
+                api_by_team=api_by_team,
+            )
             unresolved.append(
                 UnresolvedPlayer(
                     source="understat",
