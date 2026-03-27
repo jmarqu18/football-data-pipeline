@@ -30,5 +30,5 @@ Thumbs.db
 logs/
 
 # Misc
-data/.worktrees/
+data/
 .worktrees/
