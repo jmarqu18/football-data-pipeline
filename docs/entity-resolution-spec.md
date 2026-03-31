@@ -1,7 +1,7 @@
 # Entity Resolution — Spec de Diseño
 
-> **Fecha:** 2026-03-23
-> **Estado:** Aprobado para implementación
+> **Fecha:** 2026-03-31
+> **Estado:** Implementado
 > **Scope:** La Liga 2024/25, 2 fuentes (API-Football + Understat)
 
 ## Contexto
@@ -13,6 +13,7 @@ El pipeline integra 2 fuentes con IDs incompatibles. Un mismo jugador tiene `pla
 | Campo            | API-Football                    | Understat              |
 | ---------------- | ------------------------------- | ---------------------- |
 | Nombre           | `name`, `firstname`, `lastname` | `player_name` (string) |
+| Posición         | `position` (Goalkeeper/Defender/Midfielder/Attacker/Forward) | `position` (códigos: "M S", "D M", etc.) |
 | Fecha nacimiento | `birth_date` (ISO)              | **No disponible**      |
 | Nacionalidad     | `nationality`                   | **No disponible**      |
 | Equipo           | `team_name` + `team_id`         | `team`                 |
@@ -20,9 +21,7 @@ El pipeline integra 2 fuentes con IDs incompatibles. Un mismo jugador tiene `pla
 
 **Implicación clave:** Understat no expone `birth_date` ni `nationality`. No se pueden usar como criterio de matching bidireccional. El **equipo** actúa como reductor principal de candidatos (~500 jugadores → ~25 por equipo).
 
-**Fuente de identidad de jugadores Understat:** La resolución usa exclusivamente registros de `RawUnderstatPlayerSeason` (que tiene `player_name` y `team`). Los registros de `RawUnderstatShot` no tienen campo `team` y se vinculan a un jugador resuelto después, via `player_id`.
-
-> **Nota:** Esta spec supersede los valores de confidence de las 3 pasadas definidos en CLAUDE.md (1.0/0.85/0.70), que asumían `birth_date` disponible en ambas fuentes. Los valores actualizados reflejan la realidad de datos asimétricos. CLAUDE.md se actualizará tras implementación.
+**Fuente de identidad de jugadores Understat:** La resolución usa exclusivamente registros de `RawUnderstatPlayerSeason` (que tiene `player_name`, `team` y `position`). Los registros de `RawUnderstatShot` no tienen campo `team` y se vinculan a un jugador resuelto después, via `player_id`.
 
 ---
 
@@ -65,12 +64,14 @@ Normalizar ambos nombres (`unidecode` + lowercase + strip) → comparar.
 
 Cada equipo resuelto registra:
 
-- `canonical_name`: nombre normalizado elegido (de API-Football por tener ID estructurado)
+- `canonical_name`: nombre de API-Football (decodificado de HTML entities)
 - `api_football_id`: team_id de API-Football
 - `understat_name`: nombre tal cual aparece en Understat
 - `resolution_confidence` y `resolution_method`
 
-**Si un equipo no se resuelve → ERROR log.** Con 20 equipos conocidos, cualquier fallo aquí requiere intervención.
+Los equipos API-Football sin par Understat se incluyen igualmente (con `understat_name=None`, `resolution_confidence=None`, `resolution_method=None`).
+
+**Si un equipo Understat no se resuelve → WARNING log.** Con 20 equipos conocidos, cualquier fallo aquí requiere intervención.
 
 ---
 
@@ -78,11 +79,17 @@ Cada equipo resuelto registra:
 
 ### Normalización de nombres
 
+HTML entities se decodifican antes de cualquier comparación:
+
 ```python
+def decode_api_name(name: str) -> str:
+    """Decode HTML entities: 'Eto&apos;o' → "Eto'o"."""
+    return html.unescape(name)
+
 def normalize_name(name: str) -> str:
-    """unidecode + lowercase + strip + collapse whitespace."""
+    """HTML unescape → unidecode → lowercase → strip → collapse whitespace."""
     # "Vinícius Júnior" → "vinicius junior"
-    # "Pedro González López" → "pedro gonzalez lopez"
+    # "E. Eto&apos;o Pineda" → "e. eto'o pineda"
 ```
 
 ### Generación de variantes (API-Football)
@@ -91,30 +98,72 @@ Para cada jugador API-Football, generar variantes desde los 3 campos:
 
 ```python
 def build_name_variants(name: str, firstname: str | None, lastname: str | None) -> list[str]:
-    variants = {normalize(name)}          # "pedro gonzalez lopez"
+    variants = {normalize(name)}                       # "pedro gonzalez lopez"
     if firstname:
-        variants.add(normalize(firstname))      # "pedro"
+        variants.add(normalize(firstname))             # "pedro"
     if lastname:
-        variants.add(normalize(lastname))       # "gonzalez lopez"
+        variants.add(normalize(lastname))              # "gonzalez lopez"
     if firstname and lastname:
         variants.add(normalize(f"{firstname} {lastname}"))
-    return list(variants)
+    return list(variants)  # deduplicated
 ```
 
-### Función de scoring
+### Función de scoring con length guard
 
 ```python
+_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
+
 def best_match_score(understat_name: str, api_variants: list[str]) -> float:
-    """Max score entre token_sort_ratio y partial_ratio sobre todas las variantes."""
-    norm = normalize(understat_name)
-    scores = []
+    """Max score entre token_sort_ratio y partial_ratio sobre todas las variantes.
+
+    partial_ratio solo se aplica cuando la cadena más corta es al menos el 60%
+    de la longitud de la más larga. Esto evita inflación de scores cuando una
+    variante corta (p.ej. "rodriguez") es substring del nombre completo
+    ("Ricardo Rodriguez" → 1.0 sin el guard).
+    """
+    norm = normalize_name(understat_name)
+    best = 0.0
     for variant in api_variants:
-        scores.append(fuzz.token_sort_ratio(norm, variant))
-        scores.append(fuzz.partial_ratio(norm, variant))
-    return max(scores) / 100.0
+        score_token = fuzz.token_sort_ratio(norm, variant)
+        shorter = min(len(norm), len(variant))
+        longer = max(len(norm), len(variant))
+        if longer > 0 and (shorter / longer) >= _PARTIAL_RATIO_MIN_LENGTH_RATIO:
+            score_partial = fuzz.partial_ratio(norm, variant)
+        else:
+            score_partial = 0.0
+        best = max(best, score_token, score_partial)
+    return best / 100.0
 ```
 
-**Justificación de `partial_ratio`:** Captura apodos que son contracciones del nombre real. "Pedri" vs "Pedro" → `partial_ratio` ~90% porque "pedr" es casi substring de "pedro".
+**Justificación del length guard:** Sin él, `partial_ratio` daba 1.0 a variantes cortas como `"rodriguez"` porque son substring exacto del nombre normalizado `"ricardo rodriguez"`. Esto creaba conflictos falsos en Pass 2 (múltiples candidatos con score ≥ 0.85) que bloqueaban matches correctos. El umbral de 0.6 mantiene `partial_ratio` para apodos de longitud similar ("pedri" vs "pedro") pero descarta inflaciones de variantes cortas de un solo token.
+
+### Mapeo de posiciones
+
+Las posiciones de ambas fuentes se mapean a 4 cubos canónicos: `G`, `D`, `M`, `F`.
+
+**Understat** usa códigos separados por espacio: `"M S"`, `"D M"`, `"G"`, etc.
+
+| Código Understat | Cubo canónico |
+|-----------------|---------------|
+| `G`             | `G` (Goalkeeper) |
+| `D`             | `D` (Defender) |
+| `M`             | `M` (Midfielder) |
+| `F`             | `F` (Forward) |
+| `S`             | `F` (Striker → Forward) |
+| `A`             | `F` (Attacker → Forward) |
+
+**API-Football** usa strings completos: `"Goalkeeper"`, `"Defender"`, `"Midfielder"`, `"Attacker"`, `"Forward"`.
+
+```python
+def positions_compatible(understat_pos: str | None, api_pos: str | None) -> bool:
+    """True si comparten al menos un cubo canónico.
+    Si alguna posición es None o desconocida → True (sin penalización).
+    """
+```
+
+Un jugador con Understat `"M S"` (cubos: `{M, F}`) y API-Football `"Midfielder"` (cubo: `{M}`) → compatible (intersección no vacía).
+
+---
 
 ### Pass 1 — Exact name + same team → confidence 1.0
 
@@ -122,16 +171,26 @@ def best_match_score(understat_name: str, api_variants: list[str]) -> float:
 - Ambos pertenecen al mismo equipo (resuelto en Phase 1).
 - Cubre: "Jude Bellingham" ↔ "Jude Bellingham", "Robert Lewandowski" ↔ "Robert Lewandowski".
 
-### Pass 2 — Fuzzy name + same team → confidence 0.90
+### Pass 2 — Fuzzy name + same team → confidence 0.90 (0.88 con tiebreak)
 
 - `best_match_score ≥ 0.85` dentro del mismo equipo resuelto.
 - Cubre: "Vinícius Júnior" ↔ "Vinicius Junior" (acentos), "Pedri" ↔ "Pedro" (firstname variant), "Rodrygo" ↔ "Rodrygo Goes".
+
+**Resolución de conflictos por posición:**
+
+Si los dos mejores candidatos tienen scores con diferencia < `_CONFLICT_THRESHOLD` (0.05), se intenta desempatar por compatibilidad de posición:
+
+1. Filtrar candidatos en conflicto cuya posición sea compatible con la posición Understat del jugador.
+2. Si exactamente 1 candidato compatible → resolver con **confidence 0.88**, method `'fuzzy'`.
+3. Si 0 o >1 candidatos compatibles → player queda unresolved.
+
+Esta lógica solo se activa cuando `u_player.position` no es None.
 
 ### Pass 3 — Cross-team fuzzy + transfer history → confidence 0.70
 
 - Para jugadores sin match en passes 1-2 (posible transfer mid-season).
 - `best_match_score ≥ 0.75` contra TODOS los jugadores API-Football no resueltos.
-- **Confirmación obligatoria:** verificar en datos RAW de transfers (`data/raw/api_football/transfers.parquet`) que el jugador estuvo en el equipo que reporta Understat durante la temporada. Se usa la capa RAW directamente (no CLEAN) para evitar dependencia circular — los datos de transfers en CLEAN requieren que `players` esté poblada, pero entity resolution es prerequisito de esa población.
+- **Confirmación obligatoria:** verificar en datos RAW de transfers que el jugador estuvo en el equipo que reporta Understat durante la temporada. Se usa la capa RAW directamente (no CLEAN) para evitar dependencia circular.
 - Sin confirmación de transfer → no resolver, va a unresolved.
 
 ### Pass 4 — Statistical fingerprint + same team → confidence 0.60
@@ -140,79 +199,89 @@ def best_match_score(understat_name: str, api_variants: list[str]) -> float:
 
 - Solo aplica a jugadores **unresolved tras passes 1-3** que pertenecen al **mismo equipo resuelto**.
 - **Condiciones (TODAS requeridas):**
+  - `best_match_score ≥ _PASS4_NAME_FLOOR` (0.50) — filtro mínimo de nombre para evitar matches puramente estadísticos sin ninguna similitud
   - Diferencia de partidos (games/appearances) ≤ 3
   - Diferencia de minutos ≤ 20%
   - **Candidato único:** si >1 jugador API-Football cumple las condiciones estadísticas → no resolver (conflicto)
+  - **Posición compatible:** `positions_compatible(u_player.position, api_pos)` debe ser True — si las posiciones son incompatibles el match se rechaza aunque las stats coincidan
 - Method: `'statistical'`
 
 **Datos usados:**
 
-- API-Football: `appearances` y `minutes` de `RawAPIFootballPlayerStats`
-- Understat: `games` y `minutes` de `RawUnderstatPlayerSeason`
+- API-Football: `appearances` y `minutes` de `RawAPIFootballPlayerStats`, `position` de `stat.games.position`
+- Understat: `games`, `minutes` y `position` de `RawUnderstatPlayerSeason`
 
-**Justificación:** Dentro de un equipo de ~25 jugadores, la combinación de partidos + minutos es un "fingerprint" bastante único. Tras eliminar los jugadores ya resueltos en passes 1-3, el pool restante es pequeño. La restricción de candidato único evita false positives.
+**Justificación:** Dentro de un equipo de ~25 jugadores, la combinación de partidos + minutos es un "fingerprint" bastante único. La restricción de candidato único evita false positives. El check de posición es la última línea de defensa para evitar matches estadísticos cruzados entre jugadores de posiciones distintas (p.ej. dos mediocampistas con stats similares a un delantero no resuelto).
 
 **Ejemplo:**
 
 ```text
-Unresolved: Understat "Koke" (Atlético, 30 games, 2400 min)
+Unresolved: Understat "Koke" (Atlético, position="M", 30 games, 2400 min)
 Candidates: API-Football unresolved in Atlético:
-  - "Jorge Resurrección Merodio" (30 appearances, 2380 min) → ✓ unique match
+  - "Jorge Resurrección Merodio" (30 appearances, 2380 min, position="Midfielder") → compatible + unique
   → Resolved with confidence 0.60, method 'statistical'
 ```
 
 ### Reglas de integridad
 
 - **1:1 estricto:** Cada jugador de cada fuente solo puede matchear una vez.
-- **Conflictos:** Si los dos mejores candidatos tienen scores con diferencia absoluta < 0.05 (e.g., 0.90 vs 0.86), el jugador va a unresolved para revisión manual.
+- **Conflictos:** Si los dos mejores candidatos tienen scores con diferencia absoluta < 0.05 (e.g., 0.90 vs 0.86), el jugador va a unresolved para revisión manual (salvo que el tiebreak de posición lo resuelva en Pass 2).
 - **Orden de resolución:** Las pasadas se ejecutan secuencialmente. Un jugador resuelto en Pass 1 no participa en Pass 2.
 
 ---
 
 ## Jugadores no resueltos
 
-Los jugadores que no matchean en ninguna pasada:
+Los jugadores Understat que no matchean en ninguna pasada:
 
-1. **Se insertan** en `players` con solo un ID (el de su fuente). El otro ID queda NULL.
+1. Se registran como `UnresolvedPlayer` con sus top-3 candidatos API-Football.
+2. El reporte CSV se genera en `data/reports/unresolved_candidates.csv`.
+
+Los jugadores API-Football no matcheados:
+
+1. **Se insertan** en `players` con solo `api_football_id`. `understat_id` queda NULL.
 2. `resolution_confidence = NULL`, `resolution_method = 'unresolved'`.
+3. Sus stats se cargan normalmente (no se pierde dato).
 
 ### Valores válidos de `resolution_method`
 
-| Valor           | Significado                                     |
-| --------------- | ----------------------------------------------- |
-| `'exact'`       | Pass 1: exact name + same team                  |
-| `'fuzzy'`       | Pass 2: fuzzy name + same team                  |
-| `'contextual'`  | Pass 3: cross-team fuzzy + transfer confirmed   |
-| `'statistical'` | Pass 4: statistical fingerprint (games+minutes) |
-| `'unresolved'`  | No matcheó en ninguna pasada                    |
+| Valor           | Significado                                                           |
+| --------------- | --------------------------------------------------------------------- |
+| `'exact'`       | Pass 1: exact name + same team                                        |
+| `'fuzzy'`       | Pass 2: fuzzy name + same team (confidence 0.90 normal, 0.88 tiebreak) |
+| `'contextual'`  | Pass 3: cross-team fuzzy + transfer confirmed                         |
+| `'statistical'` | Pass 4: statistical fingerprint (games+minutes) + position compatible |
+| `'unresolved'`  | No matcheó en ninguna pasada                                          |
 
-3. Sus stats se cargan normalmente (no se pierde dato).
-4. **Reporte:** Se genera `data/reports/unresolved_candidates.csv`:
+### Reporte CSV
 
 ```csv
 source,player_id,player_name,team,candidate_name,candidate_source_id,fuzzy_score
-understat,8872,Pedri,Barcelona,Pedro González López,1100,72
-understat,8872,Pedri,Barcelona,Pedro Porro,2345,65
+understat,8872,Pedri,Barcelona,Pedro González López,1100,0.7200
+understat,8872,Pedri,Barcelona,Pedro Porro,2345,0.6500
 ```
 
-Top-3 candidatos más cercanos por jugador no resuelto.
+Top-3 candidatos más cercanos por jugador no resuelto. Los candidatos del mismo equipo que el jugador se priorizan en el ranking del reporte.
 
 ---
 
 ## Observabilidad
 
-| Nivel   | Qué se loguea                                                                     |
-| ------- | --------------------------------------------------------------------------------- |
-| INFO    | Total resueltos por método (exact/fuzzy/contextual/statistical), confidence media |
-| INFO    | Teams: X/Y resueltos                                                              |
-| WARNING | Cada jugador no resuelto + mejor candidato + score                                |
-| DEBUG   | Cada comparación individual en cada pasada                                        |
+| Nivel   | Qué se loguea                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------------- |
+| INFO    | Total resueltos por método (exact/fuzzy/contextual/statistical), confidence media                 |
+| INFO    | Teams: X resueltos (exact=Y, fuzzy=Z), W Understat teams sin match                                |
+| WARNING | Cada jugador Understat no resuelto + mejor candidato + score                                      |
+| WARNING | Cada equipo Understat sin match en API-Football                                                   |
+| DEBUG   | Cada match en cada pasada con scores y equipo                                                     |
+| DEBUG   | Pass 2 conflict tiebreak: candidatos evaluados por posición                                       |
+| DEBUG   | Pass 4 rejected: match estadístico descartado por posición incompatible                           |
 
 ---
 
 ## Casos de test (20 jugadores)
 
-Criterio: **≥18 de 20 correctos (90%)**.
+Criterio: **≥14 de 16 matcheables resueltos correctamente (≥87.5%)**.
 
 | #   | Understat name       | API-Football name                | firstname | Tipo de caso               | Pasada esperada |
 | --- | -------------------- | -------------------------------- | --------- | -------------------------- | --------------- |
@@ -240,11 +309,9 @@ Criterio: **≥18 de 20 correctos (90%)**.
 **Análisis de resolubilidad:**
 
 - **14 resueltos por nombre** (passes 1-3): #1-7, #9, #11-15, #18-20
-- **2 resueltos por stats** (pass 4): #8 (Koke), #10 (Isco) — apodos sin overlap fonético, pero con fingerprint estadístico único en su equipo
-- **2 unresolved esperados**: #16 (solo Understat), #17 (solo API-Football) — no tienen par en la otra fuente
+- **2 resueltos por stats** (pass 4): #8 (Koke), #10 (Isco) — apodos sin overlap fonético, fingerprint estadístico único en su equipo con posición compatible
+- **2 unresolved esperados**: #16 (solo Understat), #17 (solo API-Football)
 - **Resultado esperado: 16/16 matcheables resueltos = 100%**
-
-**Nota sobre Koke (#8) e Isco (#10):** Estos apodos no tienen relación fonética con el nombre legal (`koke` vs `jorge`, `isco` vs `francisco`). Pass 4 los resuelve por fingerprint estadístico (games + minutes) dentro de su equipo, con confidence 0.60. El test fixture debe asegurar que sus stats sean únicas dentro del equipo para que el candidato sea único.
 
 **Criterio de test:** De los 20 casos, 16 tienen par en ambas fuentes. El test valida:
 
@@ -254,31 +321,33 @@ Criterio: **≥18 de 20 correctos (90%)**.
 
 ---
 
-## Archivos a crear/modificar
+## Constantes de configuración
 
-| Archivo                             | Acción  | Descripción                                           |
-| ----------------------------------- | ------- | ----------------------------------------------------- |
-| `src/pipeline/entity_resolution.py` | Rewrite | Lógica completa: team + player resolution             |
-| `src/pipeline/models/clean.py`      | Create  | Pydantic models: `ResolvedTeam`, `ResolvedPlayer`     |
-| `tests/test_entity_resolution.py`   | Create  | Test 20 jugadores + tests unitarios de normalización  |
-| `tests/fixtures/entity_resolution/` | Create  | Fixtures con datos de ambas fuentes para 20 jugadores |
-| `docs/entity-resolution-spec.md`    | Create  | Este documento                                        |
-
-## Dependencias
-
-- `rapidfuzz` — ya en `pyproject.toml`
-- `unidecode` — **añadir** a `pyproject.toml` (no está actualmente)
+| Constante                         | Valor | Uso                                                         |
+|-----------------------------------|-------|-------------------------------------------------------------|
+| `_TEAM_FUZZY_THRESHOLD`           | 80    | token_sort_ratio mínimo para match fuzzy de equipo          |
+| `_PLAYER_FUZZY_THRESHOLD`         | 0.85  | score mínimo para Pass 2                                    |
+| `_PLAYER_CROSS_TEAM_THRESHOLD`    | 0.75  | score mínimo para Pass 3                                    |
+| `_CONFLICT_THRESHOLD`             | 0.05  | diferencia máxima entre top-2 scores para declarar conflicto |
+| `_STAT_GAMES_TOLERANCE`           | 3     | diferencia máxima de appearances en Pass 4                  |
+| `_STAT_MINUTES_TOLERANCE_PCT`     | 0.20  | diferencia máxima relativa de minutos en Pass 4             |
+| `_PASS4_NAME_FLOOR`               | 0.50  | score mínimo de nombre para entrar en Pass 4                |
+| `_PARTIAL_RATIO_MIN_LENGTH_RATIO` | 0.6   | ratio mínimo de longitud para aplicar partial_ratio         |
 
 ---
 
-## Validación end-to-end
+## Archivos implementados
 
-1. **Unit tests:** `pytest tests/test_entity_resolution.py -v`
-   - Test de normalización de nombres
-   - Test de generación de variantes
-   - Test de scoring
-   - Test de 20 jugadores conocidos (≥18 correctos)
-   - Test de manejo de unresolved
-   - Test de generación de reporte CSV
+| Archivo                             | Estado    | Descripción                                                |
+| ----------------------------------- | --------- | ---------------------------------------------------------- |
+| `src/pipeline/entity_resolution.py` | Completo  | Team + player resolution, position mapping, CSV report     |
+| `src/pipeline/models/clean.py`      | Completo  | Pydantic models: `ResolvedTeam`, `ResolvedPlayer`, etc.    |
+| `src/pipeline/models/raw.py`        | Completo  | `RawUnderstatPlayerSeason` incluye campo `position`        |
+| `src/pipeline/loaders/understat_loader.py` | Completo | Extrae `position` de soccerdata DataFrame           |
+| `tests/test_entity_resolution.py`   | Completo  | Tests unitarios + benchmark 20 jugadores                   |
+| `tests/fixtures/entity_resolution/` | Completo  | Fixtures con datos de ambas fuentes para 20 jugadores      |
 
-2. **Integration:** Ejecutar entity resolution contra datos RAW reales (Parquet) y verificar output en consola/logs.
+## Dependencias
+
+- `rapidfuzz` — fuzzy string matching
+- `unidecode` — strip diacritics para normalización
