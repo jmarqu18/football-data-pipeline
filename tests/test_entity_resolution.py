@@ -279,6 +279,64 @@ class TestBestMatchScoreLengthGuard:
 
 
 # ─────────────────────────────────────────────────────────────
+# Test: Pass 2 false-conflict regression
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassTwoFalseConflictRegression:
+    """Regression: Pass 2 must not create false conflicts from partial_ratio inflation.
+
+    Before the length guard fix, short name variants (single firstname/lastname)
+    scored 1.0 via partial_ratio substring matching, causing two distinct API-Football
+    players to both tie at 1.0 against the same Understat player.
+    """
+
+    def test_ricardo_rodriguez_resolves_without_false_conflict(self):
+        """Ricardo Rodríguez (Betis) must resolve to his correct API-Football match.
+
+        Regression: 'rodriguez' variant of a different player used to score 1.0 via
+        partial_ratio, tying with the real match and blocking resolution.
+        """
+        # Real Betis player (correct match)
+        real_variants = build_name_variants("Ricardo Rodríguez")
+        # A different player who happens to have "Rodriguez" in his name
+        impostor_variants = build_name_variants("José Rodríguez")
+
+        understat_name = "Ricardo Rodriguez"
+
+        real_score = best_match_score(understat_name, real_variants)
+        impostor_score = best_match_score(understat_name, impostor_variants)
+
+        # The real match must score strictly higher than the impostor
+        assert real_score > impostor_score, (
+            f"Real match (Ricardo Rodríguez: {real_score:.3f}) must outscore "
+            f"impostor (José Rodríguez: {impostor_score:.3f})"
+        )
+        # And the real match must meet the fuzzy threshold
+        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
+
+    def test_david_alaba_resolves_without_false_conflict(self):
+        """David Alaba (Real Madrid) must resolve to his correct API-Football match.
+
+        Regression: 'david' variant used to score 1.0 via partial_ratio when the
+        Understat name was 'David Alaba'.
+        """
+        real_variants = build_name_variants("David Alaba")
+        impostor_variants = build_name_variants("David García")
+
+        understat_name = "David Alaba"
+
+        real_score = best_match_score(understat_name, real_variants)
+        impostor_score = best_match_score(understat_name, impostor_variants)
+
+        assert real_score > impostor_score, (
+            f"Real match (David Alaba: {real_score:.3f}) must outscore "
+            f"impostor (David García: {impostor_score:.3f})"
+        )
+        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
+
+
+# ─────────────────────────────────────────────────────────────
 # Test: resolve_teams
 # ─────────────────────────────────────────────────────────────
 
