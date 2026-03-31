@@ -18,10 +18,13 @@ import pytest
 
 from pipeline.entity_resolution import (
     _get_top_candidates,
+    _parse_api_position,
+    _parse_understat_position,
     best_match_score,
     build_name_variants,
     decode_api_name,
     normalize_name,
+    positions_compatible,
     resolve_players,
     resolve_teams,
     write_unresolved_report,
@@ -879,3 +882,52 @@ def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].candidate_source_id == 490984
+
+
+class TestPositionMapping:
+    """Position parsing and compatibility checks."""
+
+    def test_understat_midfielder_striker(self):
+        assert _parse_understat_position("M S") == {"M", "F"}
+
+    def test_understat_defender_midfielder(self):
+        assert _parse_understat_position("D M S") == {"D", "M", "F"}
+
+    def test_understat_goalkeeper(self):
+        assert _parse_understat_position("G") == {"G"}
+
+    def test_understat_none_returns_empty(self):
+        assert _parse_understat_position(None) == set()
+
+    def test_understat_unknown_code_ignored(self):
+        assert _parse_understat_position("X Y G") == {"G"}
+
+    def test_api_midfielder(self):
+        assert _parse_api_position("Midfielder") == {"M"}
+
+    def test_api_goalkeeper(self):
+        assert _parse_api_position("Goalkeeper") == {"G"}
+
+    def test_api_none_returns_empty(self):
+        assert _parse_api_position(None) == set()
+
+    def test_api_unknown_returns_empty(self):
+        assert _parse_api_position("Unknown") == set()
+
+    def test_compatible_midfielder_vs_ms(self):
+        assert positions_compatible("M S", "Midfielder") is True
+
+    def test_compatible_striker_vs_attacker(self):
+        assert positions_compatible("F S", "Attacker") is True
+
+    def test_incompatible_goalkeeper_vs_midfielder(self):
+        assert positions_compatible("G", "Midfielder") is False
+
+    def test_incompatible_defender_vs_attacker(self):
+        assert positions_compatible("D", "Attacker") is False
+
+    def test_none_understat_always_compatible(self):
+        assert positions_compatible(None, "Defender") is True
+
+    def test_none_api_always_compatible(self):
+        assert positions_compatible("D", None) is True
