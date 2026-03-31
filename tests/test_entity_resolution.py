@@ -1076,3 +1076,153 @@ class TestPositionMapping:
 
     def test_none_api_always_compatible(self):
         assert positions_compatible("D", None) is True
+
+
+# ─────────────────────────────────────────────────────────────
+# Pass 4 position filter
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassFourPositionFilter:
+    """Pass 4 statistical matching must respect position compatibility."""
+
+    def _make_stats_with_position(
+        self,
+        player_id: int,
+        team_id: int,
+        team_name: str,
+        appearances: int,
+        minutes: int,
+        position: str | None,
+    ) -> RawAPIFootballPlayerStats:
+        return RawAPIFootballPlayerStats(
+            player_id=player_id,
+            team_id=team_id,
+            team_name=team_name,
+            league_id=140,
+            season=2024,
+            games=_APIFootballGames(appearances=appearances, minutes=minutes, position=position),
+            **_EMPTY_STATS_KWARGS,
+        )
+
+    def test_statistical_match_rejected_when_position_incompatible(self):
+        """A goalkeeper (API-Football) vs a forward (Understat) with matching stats must NOT resolve.
+
+        Uses Understat name "Balde" vs API-Football "Alejandro Balde Moreno"
+        (firstname="Alejandro", lastname="Balde Moreno").  The short Understat
+        name scores ~0.59 against the variants — above _PASS4_NAME_FLOOR (0.50)
+        but below the Pass 2 fuzzy threshold (0.85) — so the player can only
+        be matched in Pass 4.  Incompatible positions ("Goalkeeper" vs "F")
+        must then block the match.
+        """
+        team = _make_resolved_team(api_id=600, api_name="Test FC", understat_name="Test FC")
+
+        # API-Football: goalkeeper with a compound surname (no short variant that
+        # would score >= 0.85 against the single-token Understat name)
+        api_player = _make_api_player(
+            601,
+            "Alejandro Balde Moreno",
+            firstname="Alejandro",
+            lastname="Balde Moreno",
+        )
+        api_stats = self._make_stats_with_position(
+            601, 600, "Test FC", appearances=28, minutes=2520, position="Goalkeeper"
+        )
+
+        # Understat: forward — short name token, incompatible position
+        understat_player = RawUnderstatPlayerSeason(
+            player_id=6001,
+            player_name="Balde",
+            team="Test FC",
+            season="2024/2025",
+            games=28,
+            minutes=2520,
+            goals=0,
+            assists=0,
+            xg=0.0,
+            xa=0.0,
+            npxg=0.0,
+            xg_chain=0.0,
+            xg_buildup=0.0,
+            shots=0,
+            key_passes=0,
+            yellow_cards=0,
+            red_cards=0,
+            position="F",
+        )
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+            raw_transfers=[],
+        )
+
+        # Must be unresolved — position mismatch blocks statistical acceptance
+        assert len(result.unresolved) == 1
+        assert result.unresolved[0].player_name == "Balde"
+
+        # API-Football player must remain single-source (no understat_id)
+        api_resolved = [p for p in result.resolved_players if p.api_football_id == 601]
+        assert len(api_resolved) == 1
+        assert api_resolved[0].understat_id is None
+
+    def test_statistical_match_accepted_when_position_compatible(self):
+        """A defender (API-Football) vs a defender (Understat) with matching stats should resolve.
+
+        Same name-distance pattern: Understat "Balde" vs API-Football
+        "Alejandro Balde Moreno" scores ~0.59, passing the name floor but not
+        the fuzzy threshold, so resolution must go through Pass 4.  Compatible
+        positions ("Defender" vs "D") must allow the match at confidence 0.60.
+        """
+        team = _make_resolved_team(api_id=700, api_name="Sample SC", understat_name="Sample SC")
+
+        api_player = _make_api_player(
+            701,
+            "Alejandro Balde Moreno",
+            firstname="Alejandro",
+            lastname="Balde Moreno",
+        )
+        api_stats = self._make_stats_with_position(
+            701, 700, "Sample SC", appearances=22, minutes=1900, position="Defender"
+        )
+
+        understat_player = RawUnderstatPlayerSeason(
+            player_id=7001,
+            player_name="Balde",
+            team="Sample SC",
+            season="2024/2025",
+            games=22,
+            minutes=1900,
+            goals=0,
+            assists=0,
+            xg=0.0,
+            xa=0.0,
+            npxg=0.0,
+            xg_chain=0.0,
+            xg_buildup=0.0,
+            shots=0,
+            key_passes=0,
+            yellow_cards=0,
+            red_cards=0,
+            position="D",
+        )
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+            raw_transfers=[],
+        )
+
+        # Must be resolved via statistical matching
+        statistical = [
+            p for p in result.resolved_players
+            if p.resolution_method == "statistical" and p.api_football_id == 701
+        ]
+        assert len(statistical) == 1
+        assert statistical[0].understat_id == 7001
+        assert statistical[0].resolution_confidence == 0.60
+        assert len(result.unresolved) == 0

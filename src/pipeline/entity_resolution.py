@@ -681,17 +681,32 @@ def resolve_players(
         if len(stat_matches) == 1:
             api_id = stat_matches[0]
             api_p = api_player_map[api_id]
-            resolved.append(_make_resolved(api_p, u_player, 0.60, "statistical"))
-            matched_api.add(api_id)
-            matched_understat.add(u_player.player_id)
-            logger.debug(
-                "Pass 4 statistical: '%s' ↔ '%s' (team=%s, games=%d, minutes=%d)",
-                u_player.player_name,
-                api_p.name,
-                u_player.team,
-                u_player.games,
-                u_player.minutes,
-            )
+            # Check position compatibility before accepting the statistical match.
+            api_pos: str | None = None
+            for stat in api_stats_by_player.get(api_id, []):
+                if stat.games.position:
+                    api_pos = stat.games.position
+                    break
+            if not positions_compatible(u_player.position, api_pos):
+                logger.debug(
+                    "Pass 4 statistical rejected (position mismatch): '%s' (pos=%s) ↔ '%s' (pos=%s)",
+                    u_player.player_name,
+                    u_player.position,
+                    api_p.name,
+                    api_pos,
+                )
+            else:
+                resolved.append(_make_resolved(api_p, u_player, 0.60, "statistical"))
+                matched_api.add(api_id)
+                matched_understat.add(u_player.player_id)
+                logger.debug(
+                    "Pass 4 statistical: '%s' ↔ '%s' (team=%s, games=%d, minutes=%d)",
+                    u_player.player_name,
+                    api_p.name,
+                    u_player.team,
+                    u_player.games,
+                    u_player.minutes,
+                )
         elif len(stat_matches) > 1:
             logger.debug(
                 "Pass 4 conflict: '%s' has %d stat matches in team, skipping",
