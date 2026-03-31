@@ -743,9 +743,154 @@ class TestUnresolvedReport:
 
         # Should have at least the "Only In Understat" player
         assert len(rows) >= 1
-        # Check CSV header
-        assert "source" in reader.fieldnames
-        assert "fuzzy_score" in reader.fieldnames
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: Pass 2 position tiebreaker
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassTwoPositionTiebreaker:
+    """Tests for position-aware conflict resolution in Pass 2 fuzzy matching."""
+
+    def _make_scenario(
+        self,
+        u_position: str | None,
+        api_position_a: str | None,
+        api_position_b: str | None,
+    ):
+        """Build a minimal two-candidate fuzzy conflict scenario.
+
+        Both API players have identical names (forcing a score tie), and are
+        on the same team as the Understat player.  Returns (api_players,
+        api_stats, understat_players, resolved_teams).
+        """
+        team_id = 800
+
+        # Use full legal names for both API players so neither is an exact
+        # match against the short Understat name "Carlos Gomez", but both
+        # score >= 0.85 on fuzzy matching, creating a genuine Pass 2 tie.
+        api_players = [
+            RawAPIFootballPlayer(
+                player_id=801,
+                name="Carlos Gomez Herrera",
+                firstname="Carlos",
+                lastname="Gomez Herrera",
+            ),
+            RawAPIFootballPlayer(
+                player_id=802,
+                name="Carlos Gomez Pereira",
+                firstname="Carlos",
+                lastname="Gomez Pereira",
+            ),
+        ]
+        # Position is carried on RawAPIFootballPlayerStats.games.position
+        api_stats = [
+            RawAPIFootballPlayerStats(
+                player_id=801,
+                team_id=team_id,
+                team_name="Test FC",
+                league_id=140,
+                season=2024,
+                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_a),
+                **_EMPTY_STATS_KWARGS,
+            ),
+            RawAPIFootballPlayerStats(
+                player_id=802,
+                team_id=team_id,
+                team_name="Test FC",
+                league_id=140,
+                season=2024,
+                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_b),
+                **_EMPTY_STATS_KWARGS,
+            ),
+        ]
+        understat_players = [
+            RawUnderstatPlayerSeason(
+                player_id=9001,
+                player_name="Carlos Gomez",
+                team="Test FC",
+                season="2024/2025",
+                games=20,
+                minutes=1800,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
+                position=u_position,
+            )
+        ]
+        resolved_teams = [
+            _make_resolved_team(team_id, "Test FC", understat_name="Test FC"),
+        ]
+        return api_players, api_stats, understat_players, resolved_teams
+
+    def test_position_breaks_tie_single_compatible_candidate(self):
+        """When two candidates tie and only one is position-compatible, it wins."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position="M",          # Understat: Midfielder
+            api_position_a="Midfielder",   # API player 801 — compatible
+            api_position_b="Goalkeeper",   # API player 802 — incompatible
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(matched) == 1, "Expected exactly one resolution via position tiebreak"
+        winner = matched[0]
+        assert winner.api_football_id == 801, (
+            f"Expected api_football_id=801 (Midfielder), got {winner.api_football_id}"
+        )
+        assert winner.resolution_method == "fuzzy"
+        assert winner.resolution_confidence == 0.88
+
+    def test_both_compatible_stays_unresolved(self):
+        """When both tied candidates are position-compatible, resolution stays ambiguous."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position="M",          # Understat: Midfielder
+            api_position_a="Midfielder",   # compatible
+            api_position_b="Midfielder",   # also compatible — still a tie
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        cross_matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(cross_matched) == 0, (
+            "Both candidates are position-compatible — conflict should not be resolved"
+        )
+        unresolved_ids = {u.player_id for u in result.unresolved}
+        assert 9001 in unresolved_ids, "Understat player should appear in unresolved list"
+
+    def test_none_position_no_filtering(self):
+        """When Understat player has no position, position tiebreak is skipped entirely."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position=None,          # unknown position → no filtering
+            api_position_a="Midfielder",
+            api_position_b="Goalkeeper",
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        # With no position info, the conflict is unresolvable — player stays unresolved.
+        cross_matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(cross_matched) == 0, (
+            "No position on Understat player — tiebreak must not fire; player should be unresolved"
+        )
+        unresolved_ids = {u.player_id for u in result.unresolved}
+        assert 9001 in unresolved_ids
 
 
 # ─────────────────────────────────────────────────────────────

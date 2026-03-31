@@ -563,26 +563,62 @@ def resolve_players(
         best_score = 0.0
         best_api_id: int | None = None
         all_scores: list[float] = []
+        scores_by_id: dict[int, float] = {}
         for api_id in candidates_in_team:
             variants = api_variants_map.get(api_id, [])
             score = best_match_score(u_player.player_name, variants)
             all_scores.append(score)
+            scores_by_id[api_id] = score
             if score > best_score:
                 best_score = score
                 best_api_id = api_id
 
-        if best_api_id is not None and best_score >= _PLAYER_FUZZY_THRESHOLD and not _has_conflict(all_scores):
-            api_p = api_player_map[best_api_id]
-            resolved.append(_make_resolved(api_p, u_player, 0.90, "fuzzy"))
-            matched_api.add(best_api_id)
-            matched_understat.add(u_player.player_id)
-            logger.debug(
-                "Pass 2 fuzzy: '%s' ↔ '%s' (score=%.3f, team=%s)",
-                u_player.player_name,
-                api_p.name,
-                best_score,
-                u_player.team,
-            )
+        if best_api_id is not None and best_score >= _PLAYER_FUZZY_THRESHOLD:
+            if not _has_conflict(all_scores):
+                api_p = api_player_map[best_api_id]
+                resolved.append(_make_resolved(api_p, u_player, 0.90, "fuzzy"))
+                matched_api.add(best_api_id)
+                matched_understat.add(u_player.player_id)
+                logger.debug(
+                    "Pass 2 fuzzy: '%s' ↔ '%s' (score=%.3f, team=%s)",
+                    u_player.player_name,
+                    api_p.name,
+                    best_score,
+                    u_player.team,
+                )
+            elif u_player.position:
+                # Conflict: multiple candidates within _CONFLICT_THRESHOLD of the top score.
+                # Try to break the tie via position compatibility.
+                top_candidate_ids = [
+                    api_id
+                    for api_id, score in scores_by_id.items()
+                    if score >= _PLAYER_FUZZY_THRESHOLD and (best_score - score) < _CONFLICT_THRESHOLD
+                ]
+                def _api_position(api_id: int) -> str | None:
+                    """Return the API-Football position string for a player, from stats."""
+                    for stat in api_stats_by_player.get(api_id, []):
+                        if stat.games.position:
+                            return stat.games.position
+                    return None
+
+                compatible_ids = [
+                    api_id
+                    for api_id in top_candidate_ids
+                    if positions_compatible(u_player.position, _api_position(api_id))
+                ]
+                if len(compatible_ids) == 1:
+                    api_p = api_player_map[compatible_ids[0]]
+                    resolved.append(_make_resolved(api_p, u_player, 0.88, "fuzzy"))
+                    matched_api.add(compatible_ids[0])
+                    matched_understat.add(u_player.player_id)
+                    logger.debug(
+                        "Pass 2 fuzzy (position tiebreak): '%s' ↔ '%s' (score=%.3f, team=%s, position=%s)",
+                        u_player.player_name,
+                        api_p.name,
+                        best_score,
+                        u_player.team,
+                        u_player.position,
+                    )
 
     # ── Pass 3: Cross-team fuzzy + transfer history ──
     for u_player in understat_players:
