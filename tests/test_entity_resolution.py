@@ -275,7 +275,7 @@ class TestBestMatchScoreLengthGuard:
     def test_nickname_matching_preserved(self):
         """Short nicknames that are genuine matches should still work via token_sort_ratio."""
         score = best_match_score("Pedri", ["pedro gonzalez lopez", "pedro", "gonzalez lopez"])
-        assert score >= 0.75, f"Nickname matching should be preserved, got {score:.3f}"
+        assert score >= 0.80, f"Nickname matching should be preserved, got {score:.3f}"
 
 
 # ─────────────────────────────────────────────────────────────

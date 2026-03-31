@@ -109,6 +109,9 @@ def build_name_variants(
     return list(variants)
 
 
+_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
+
+
 def best_match_score(understat_name: str, api_variants: list[str]) -> float:
     """Return the best fuzzy match score between an Understat name and API-Football variants.
 
@@ -256,7 +259,6 @@ def resolve_teams(
 # Player resolution
 # ─────────────────────────────────────────────────────────────
 
-_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
 _PLAYER_FUZZY_THRESHOLD = 0.85
 _PLAYER_CROSS_TEAM_THRESHOLD = 0.75
 _CONFLICT_THRESHOLD = 0.05
