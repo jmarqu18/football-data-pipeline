@@ -106,6 +106,7 @@ def _make_api_stats(
     team_name: str,
     appearances: int = 0,
     minutes: int = 0,
+    position: str | None = None,
 ) -> RawAPIFootballPlayerStats:
     return RawAPIFootballPlayerStats(
         player_id=player_id,
@@ -113,7 +114,7 @@ def _make_api_stats(
         team_name=team_name,
         league_id=140,
         season=2024,
-        games=_APIFootballGames(appearances=appearances, minutes=minutes),
+        games=_APIFootballGames(appearances=appearances, minutes=minutes, position=position),
         **_EMPTY_STATS_KWARGS,
     )
 
@@ -124,6 +125,7 @@ def _make_understat_player(
     team: str,
     games: int = 0,
     minutes: int = 0,
+    position: str | None = None,
 ) -> RawUnderstatPlayerSeason:
     return RawUnderstatPlayerSeason(
         player_id=player_id,
@@ -143,6 +145,7 @@ def _make_understat_player(
         key_passes=0,
         yellow_cards=0,
         red_cards=0,
+        position=position,
     )
 
 
@@ -490,60 +493,60 @@ def twenty_players_fixture():
     # fmt: on
 
     api_stats = [
-        _make_api_stats(101, REAL_MADRID, "Real Madrid", appearances=30, minutes=2500),
-        _make_api_stats(102, BARCA, "Barcelona", appearances=32, minutes=2700),
-        _make_api_stats(103, REAL_MADRID, "Real Madrid", appearances=28, minutes=2300),
-        _make_api_stats(104, BARCA, "Barcelona", appearances=25, minutes=2100),
-        _make_api_stats(105, REAL_MADRID, "Real Madrid", appearances=26, minutes=1800),
-        _make_api_stats(106, BARCA, "Barcelona", appearances=30, minutes=2400),
-        _make_api_stats(107, ATLETICO, "Atletico Madrid", appearances=29, minutes=2450),
+        _make_api_stats(101, REAL_MADRID, "Real Madrid", appearances=30, minutes=2500, position="Midfielder"),
+        _make_api_stats(102, BARCA, "Barcelona", appearances=32, minutes=2700, position="Attacker"),
+        _make_api_stats(103, REAL_MADRID, "Real Madrid", appearances=28, minutes=2300, position="Attacker"),
+        _make_api_stats(104, BARCA, "Barcelona", appearances=25, minutes=2100, position="Midfielder"),
+        _make_api_stats(105, REAL_MADRID, "Real Madrid", appearances=26, minutes=1800, position="Attacker"),
+        _make_api_stats(106, BARCA, "Barcelona", appearances=30, minutes=2400, position="Attacker"),
+        _make_api_stats(107, ATLETICO, "Atletico Madrid", appearances=29, minutes=2450, position="Attacker"),
         # Koke: unique stats in Atletico (30 games, 2600 min)
-        _make_api_stats(108, ATLETICO, "Atletico Madrid", appearances=30, minutes=2600),
-        _make_api_stats(109, ATLETICO, "Atletico Madrid", appearances=33, minutes=2970),
+        _make_api_stats(108, ATLETICO, "Atletico Madrid", appearances=30, minutes=2600, position="Midfielder"),
+        _make_api_stats(109, ATLETICO, "Atletico Madrid", appearances=33, minutes=2970, position="Goalkeeper"),
         # Isco: unique stats in Betis (22 games, 1500 min)
-        _make_api_stats(110, BETIS, "Real Betis", appearances=22, minutes=1500),
-        _make_api_stats(111, REAL_MADRID, "Real Madrid", appearances=20, minutes=1200),
-        _make_api_stats(112, REAL_MADRID, "Real Madrid", appearances=15, minutes=1350),
+        _make_api_stats(110, BETIS, "Real Betis", appearances=22, minutes=1500, position="Midfielder"),
+        _make_api_stats(111, REAL_MADRID, "Real Madrid", appearances=20, minutes=1200, position="Attacker"),
+        _make_api_stats(112, REAL_MADRID, "Real Madrid", appearances=15, minutes=1350, position="Defender"),
         # Transfer Player: stats in Villarreal (was transferred from Getafe)
-        _make_api_stats(113, VILLARREAL, "Villarreal", appearances=15, minutes=1200),
-        _make_api_stats(114, ATLETICO, "Atletico Madrid", appearances=27, minutes=2200),
-        _make_api_stats(115, ATLETICO, "Atletico Madrid", appearances=24, minutes=1800),
-        _make_api_stats(117, GIRONA, "Girona", appearances=10, minutes=600),
-        _make_api_stats(118, BARCA, "Barcelona", appearances=22, minutes=1600),
-        _make_api_stats(119, ATHLETIC, "Athletic Club", appearances=31, minutes=2700),
-        _make_api_stats(120, VALENCIA, "Valencia", appearances=28, minutes=2300),
+        _make_api_stats(113, VILLARREAL, "Villarreal", appearances=15, minutes=1200, position="Midfielder"),
+        _make_api_stats(114, ATLETICO, "Atletico Madrid", appearances=27, minutes=2200, position="Attacker"),
+        _make_api_stats(115, ATLETICO, "Atletico Madrid", appearances=24, minutes=1800, position="Attacker"),
+        _make_api_stats(117, GIRONA, "Girona", appearances=10, minutes=600, position="Midfielder"),
+        _make_api_stats(118, BARCA, "Barcelona", appearances=22, minutes=1600, position="Attacker"),
+        _make_api_stats(119, ATHLETIC, "Athletic Club", appearances=31, minutes=2700, position="Attacker"),
+        _make_api_stats(120, VALENCIA, "Valencia", appearances=28, minutes=2300, position="Attacker"),
         # Extra Atletico player: very different stats from Koke
-        _make_api_stats(150, ATLETICO, "Atletico Madrid", appearances=5, minutes=200),
+        _make_api_stats(150, ATLETICO, "Atletico Madrid", appearances=5, minutes=200, position="Midfielder"),
         # Extra Betis player: very different stats from Isco
-        _make_api_stats(151, BETIS, "Real Betis", appearances=8, minutes=400),
+        _make_api_stats(151, BETIS, "Real Betis", appearances=8, minutes=400, position="Midfielder"),
     ]
 
     # fmt: off
     understat_players = [
-        _make_understat_player(1001, "Jude Bellingham", "Real Madrid", 30, 2500),
-        _make_understat_player(1002, "Robert Lewandowski", "Barcelona", 32, 2700),
-        _make_understat_player(1003, "Vinicius Junior", "Real Madrid", 28, 2300),
-        _make_understat_player(1004, "Pedri", "Barcelona", 25, 2100),
-        _make_understat_player(1005, "Rodrygo", "Real Madrid", 26, 1800),
-        _make_understat_player(1006, "Lamine Yamal", "Barcelona", 30, 2400),
-        _make_understat_player(1007, "Antoine Griezmann", "Atletico Madrid", 29, 2450),
+        _make_understat_player(1001, "Jude Bellingham", "Real Madrid", 30, 2500, position="M"),
+        _make_understat_player(1002, "Robert Lewandowski", "Barcelona", 32, 2700, position="F S"),
+        _make_understat_player(1003, "Vinicius Junior", "Real Madrid", 28, 2300, position="F S"),
+        _make_understat_player(1004, "Pedri", "Barcelona", 25, 2100, position="M"),
+        _make_understat_player(1005, "Rodrygo", "Real Madrid", 26, 1800, position="F S"),
+        _make_understat_player(1006, "Lamine Yamal", "Barcelona", 30, 2400, position="F M"),
+        _make_understat_player(1007, "Antoine Griezmann", "Atletico Madrid", 29, 2450, position="F M"),
         # Koke: same team + unique stats (31 games, 2550 min ≈ 30/2600)
-        _make_understat_player(1008, "Koke", "Atletico Madrid", 31, 2550),
-        _make_understat_player(1009, "Jan Oblak", "Atletico Madrid", 33, 2970),
+        _make_understat_player(1008, "Koke", "Atletico Madrid", 31, 2550, position="M"),
+        _make_understat_player(1009, "Jan Oblak", "Atletico Madrid", 33, 2970, position="G"),
         # Isco: same team + unique stats (23 games, 1450 min ≈ 22/1500)
-        _make_understat_player(1010, "Isco", "Real Betis", 23, 1450),
-        _make_understat_player(1011, "Joselu", "Real Madrid", 20, 1200),
-        _make_understat_player(1012, "Dani Carvajal", "Real Madrid", 15, 1350),
+        _make_understat_player(1010, "Isco", "Real Betis", 23, 1450, position="M"),
+        _make_understat_player(1011, "Joselu", "Real Madrid", 20, 1200, position="F S"),
+        _make_understat_player(1012, "Dani Carvajal", "Real Madrid", 15, 1350, position="D"),
         # Transfer Player: Understat shows at Getafe (transferred from there)
-        _make_understat_player(1013, "Transfer Player", "Getafe", 12, 900),
-        _make_understat_player(1014, "Alexander Sørloth", "Atletico Madrid", 27, 2200),
-        _make_understat_player(1015, "Álvaro Morata", "Atletico Madrid", 24, 1800),
+        _make_understat_player(1013, "Transfer Player", "Getafe", 12, 900, position="M"),
+        _make_understat_player(1014, "Alexander Sørloth", "Atletico Madrid", 27, 2200, position="F S"),
+        _make_understat_player(1015, "Álvaro Morata", "Atletico Madrid", 24, 1800, position="F S"),
         # #16 — Only in Understat
-        _make_understat_player(1016, "Zinedine Phantom", "Girona", 5, 200),
+        _make_understat_player(1016, "Zinedine Phantom", "Girona", 5, 200, position="M"),
         # #18-20
-        _make_understat_player(1018, "Ferran Torres", "Barcelona", 22, 1600),
-        _make_understat_player(1019, "Iñaki Williams", "Athletic Club", 31, 2700),
-        _make_understat_player(1020, "Hugo Duro", "Valencia", 28, 2300),
+        _make_understat_player(1018, "Ferran Torres", "Barcelona", 22, 1600, position="F M"),
+        _make_understat_player(1019, "Iñaki Williams", "Athletic Club", 31, 2700, position="F M"),
+        _make_understat_player(1020, "Hugo Duro", "Valencia", 28, 2300, position="F S"),
     ]
     # fmt: on
 
