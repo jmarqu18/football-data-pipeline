@@ -111,6 +111,7 @@ class UnderstatLoader:
             "key_passes": row["key_passes"],
             "yellow_cards": row["yellow_cards"],
             "red_cards": row["red_cards"],
+            "position": str(row.get("position", "") or "").strip() or None,
         }
 
     # ─────────────────────────────────────────────────────────
