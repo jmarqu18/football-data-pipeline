@@ -113,6 +113,10 @@ def best_match_score(understat_name: str, api_variants: list[str]) -> float:
     """Return the best fuzzy match score between an Understat name and API-Football variants.
 
     Uses the maximum of token_sort_ratio and partial_ratio across all variants.
+    partial_ratio is only considered when the shorter string is at least 60% of
+    the longer string's length, preventing inflated scores from substring matches
+    (e.g. variant "rodriguez" scoring 1.0 against "Ricardo Rodríguez").
+
     Returns a value in [0.0, 1.0].
     """
     norm = normalize_name(understat_name)
@@ -123,7 +127,12 @@ def best_match_score(understat_name: str, api_variants: list[str]) -> float:
         if not variant:
             continue
         score_token = fuzz.token_sort_ratio(norm, variant)
-        score_partial = fuzz.partial_ratio(norm, variant)
+        shorter = min(len(norm), len(variant))
+        longer = max(len(norm), len(variant))
+        if longer > 0 and (shorter / longer) >= _PARTIAL_RATIO_MIN_LENGTH_RATIO:
+            score_partial = fuzz.partial_ratio(norm, variant)
+        else:
+            score_partial = 0.0
         best = max(best, score_token, score_partial)
     return best / 100.0
 
@@ -247,6 +256,7 @@ def resolve_teams(
 # Player resolution
 # ─────────────────────────────────────────────────────────────
 
+_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
 _PLAYER_FUZZY_THRESHOLD = 0.85
 _PLAYER_CROSS_TEAM_THRESHOLD = 0.75
 _CONFLICT_THRESHOLD = 0.05

@@ -248,6 +248,37 @@ class TestBestMatchScore:
 
 
 # ─────────────────────────────────────────────────────────────
+# Test: best_match_score length guard
+# ─────────────────────────────────────────────────────────────
+
+
+class TestBestMatchScoreLengthGuard:
+    """partial_ratio must not inflate scores when variant is much shorter than target."""
+
+    def test_short_lastname_variant_not_inflated(self):
+        """'rodriguez' (lastname variant) must NOT score 1.0 against 'Ricardo Rodríguez'."""
+        score = best_match_score("Ricardo Rodríguez", ["rodriguez"])
+        # Without guard: partial_ratio gives 1.0 (substring match)
+        # With guard: token_sort_ratio gives ~0.69
+        assert score < 0.85, f"Short variant 'rodriguez' should not inflate to {score:.3f}"
+
+    def test_short_firstname_variant_not_inflated(self):
+        """'david' (firstname variant) must NOT score 1.0 against 'David Alaba'."""
+        score = best_match_score("David Alaba", ["david"])
+        assert score < 0.85, f"Short variant 'david' should not inflate to {score:.3f}"
+
+    def test_similar_length_variant_still_uses_partial_ratio(self):
+        """Variants of similar length should still benefit from partial_ratio."""
+        score = best_match_score("Ricardo Rodríguez", ["r. rodriguez"])
+        assert score >= 0.85, f"Similar-length variant should still score high, got {score:.3f}"
+
+    def test_nickname_matching_preserved(self):
+        """Short nicknames that are genuine matches should still work via token_sort_ratio."""
+        score = best_match_score("Pedri", ["pedro gonzalez lopez", "pedro", "gonzalez lopez"])
+        assert score >= 0.75, f"Nickname matching should be preserved, got {score:.3f}"
+
+
+# ─────────────────────────────────────────────────────────────
 # Test: resolve_teams
 # ─────────────────────────────────────────────────────────────
 
