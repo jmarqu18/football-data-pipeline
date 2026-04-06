@@ -12,6 +12,9 @@ __pycache__/
 .claude
 .agent
 .kilo
+CLAUDE.md
+AGENTS.md
+.opencode
 **/plans/
 
 # Environment
