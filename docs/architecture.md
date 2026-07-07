@@ -2,19 +2,19 @@
 
 ## Visión General
 
-Pipeline de datos multi-fuente que ingesta, limpia, fusiona y sirve datos de fútbol provenientes de 3 fuentes heterogéneas: **API-Football**, **Understat** y **FBref**. Resuelve entity resolution entre fuentes con sistemas de IDs incompatibles. Airflow orquesta todo el flujo; Pydantic v2 valida los datos en cada transición entre capas.
+Pipeline de datos multi-fuente que ingesta, limpia, fusiona y sirve datos de fútbol provenientes de **API-Football** y **Understat**. Resuelve entity resolution entre fuentes con sistemas de IDs incompatibles. Airflow 3.x orquesta todo el flujo; Pydantic v2 valida los datos en cada transición entre capas.
 
 **Scope actual:** La Liga 2024/25 (configurable vía `config/ingestion.yaml`).
 
-Para el contexto de por qué estas fuentes y no otras, ver [ADR-002](adr/002-data-source-selection.md). Para por qué no se incluye event data, ver [ADR-003](adr/003-event-data-out-of-scope.md).
+Para el contexto de por qué estas fuentes y no otras, ver [ADR-002](adr/002-data-source-selection.md). Para por qué no se incluye event data, ver [ADR-003](adr/003-event-data-out-of-scope.md). La estrategia de entity resolution se detalla en [ADR-004](adr/004-entity-resolution-strategy.md).
 
 ```
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ API-Football │   │  Understat   │   │    FBref     │
-│  (REST API)  │   │  (scraping)  │   │  (scraping)  │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       ▼                  ▼                  ▼
+┌─────────────┐   ┌─────────────┐
+│ API-Football │   │  Understat   │
+│  (REST API)  │   │  (scraping)  │
+└──────┬───────┘   └──────┬───────┘
+       │                  │
+       ▼                  ▼
 ┌──────────────┐   ┌─────────────────────────────────┐
 │ CACHE        │   │         CAPA 1 — RAW            │
 │ data/cache/  │──▶│         data/raw/ (Parquet)      │
@@ -49,7 +49,6 @@ Para el contexto de por qué estas fuentes y no otras, ver [ADR-002](adr/002-dat
 |--------|-----------|-------------|--------|
 | **API-Football** | Stats jugador/equipo, lesiones, transferencias, imágenes | Season + Player | REST API, free tier (100 calls/día) |
 | **Understat** | Métricas avanzadas (xG, xA, npxG, xGChain, xGBuildup) + shot data | Temporada/jugador + Tiro individual | `soccerdata` (scraping) |
-| **FBref** | Stats base agregadas: goles, minutos, tarjetas, tiros, tackles | Temporada/jugador | `soccerdata` (scraping) |
 
 Cada fuente usa su propio sistema de IDs. El pipeline los reconcilia en la capa CLEAN mediante entity resolution.
 
@@ -62,10 +61,10 @@ API-Football tiene un límite de 100 calls/día en el free tier. Para no agotar 
 ```
 data/cache/api_football/
 ├── players/
-│   ├── league_140_season_2024_page_1.json
-│   └── league_140_season_2024_page_2.json
+│   ├── league_140_season_2024_team_529_page_1.json
+│   └── league_140_season_2024_team_541_page_1.json
 ├── injuries/
-│   └── league_140_season_2024_page_1.json
+│   └── league_140_season_2024.json
 └── transfers/
     ├── team_529.json
     └── team_541.json
@@ -87,11 +86,9 @@ data/raw/
 │   ├── players.parquet
 │   ├── injuries.parquet
 │   └── transfers.parquet
-├── understat/
-│   ├── shots.parquet
-│   └── player_season.parquet    # xG, xA, npxG, xGChain, xGBuildup
-└── fbref/
-    └── player_season_stats.parquet
+└── understat/
+    ├── shots.parquet
+    └── player_season.parquet    # xG, xA, npxG, xGChain, xGBuildup
 ```
 
 Understat produce 2 outputs: shot-level (cada disparo con coordenadas y xG) y season-level (métricas avanzadas agregadas por jugador/temporada). Son datos distintos que no se derivan uno del otro.
@@ -108,9 +105,9 @@ Understat produce 2 outputs: shot-level (cada disparo con coordenadas y xG) y se
 
 | Tabla | Fuente principal | Qué contiene |
 |-------|-----------------|-------------|
-| `teams` | API-Football + FBref | Identidad de equipos, IDs cruzados, logo |
-| `players` | Las 3 fuentes | Identidad unificada, IDs cruzados, metadata de resolución |
-| `player_season_stats` | FBref + API-Football | Stats base: appearances, minutes, goals, assists, shots, cards |
+| `teams` | API-Football + Understat | Identidad de equipos, IDs cruzados, logo |
+| `players` | Ambas fuentes | Identidad unificada, IDs cruzados, metadata de resolución |
+| `player_season_stats` | API-Football | Stats base: appearances, minutes, goals, assists, shots, cards |
 | `player_season_advanced` | Understat (season) | Métricas avanzadas: xG, xA, npxG, xGChain, xGBuildup |
 | `player_shots` | Understat (shots) | Cada tiro: coordenadas x/y, xG, resultado, situación |
 | `player_profile` | API-Football | Scouting: height, weight, foot, position, contract |
@@ -118,8 +115,6 @@ Understat produce 2 outputs: shot-level (cada disparo con coordenadas y xG) y se
 | `player_transfers` | API-Football | Historial de traspasos: equipos, fecha, tipo, fee |
 
 Las tablas `players` y `teams` incluyen campos de entity resolution: `resolution_confidence`, `resolution_method` y `resolved_at`.
-
-Tablas pospuestas a sprints futuros: `competitions`, `seasons`, `matches`, `lineups`, `player_match_stats`.
 
 ### Capa 3 — FEATURES (`data/features/`)
 
@@ -145,24 +140,22 @@ Tablas pospuestas a sprints futuros: `competitions`, `seasons`, `matches`, `line
 | **Contenido** | Vista desnormalizada `player_season_stats_flat` con todas las métricas, IDs cruzados, foto de jugador y logo de equipo |
 | **Acceso** | Datasette en `:8001` con UI, API JSON, exportación CSV y queries predefinidas |
 
-Queries predefinidas en `metadata.yml`: Top 10 por xG overperformance, jugadores con más lesiones, jugadores con confidence < 0.8, distribución de tiros por zona.
+Queries predefinidas en `config/datasette/metadata.yml`: Top 10 por xG overperformance, jugadores con más lesiones, jugadores con confidence < 0.8, distribución de tiros por zona.
 
 ## Orquestación
 
-Airflow con TaskFlow API. 6 DAGs independientes ejecutables por separado:
+Airflow 3.x con TaskFlow API. 5 DAGs independientes ejecutables por separado:
 
 ```
 ingest_api_football ──┐
-ingest_understat ─────┼──▶ transform_clean ──▶ build_features ──▶ enrich
-ingest_fbref ─────────┘
+ingest_understat ─────┼──▶ transform_clean ──▶ build_features ──▶ export_enriched
 ```
 
-- **ingest_api_football**: carga config YAML, llama al loader con rate limiting y cache.
-- **ingest_understat**: scraping de shots + season stats (2 outputs Parquet).
-- **ingest_fbref**: scraping de stats básicas.
-- **transform_clean**: team resolution → player resolution → inserta en PostgreSQL.
-- **build_features**: lee CLEAN, calcula métricas, escribe Parquet en `data/features/`.
-- **enrich**: exporta a SQLite, refresca Datasette.
+- **ingest_api_football** (5 tasks): carga config YAML, teams, players per-team, injuries, transfers, standings.
+- **ingest_understat** (2 tasks): scraping de shots + season stats (2 outputs Parquet).
+- **transform_clean** (1 task): team resolution → player resolution → inserta en PostgreSQL.
+- **build_features** (1 task): lee CLEAN, calcula métricas, escribe Parquet en `data/features/`.
+- **export_enriched** (1 task): exporta a SQLite, construye flat view + shots table.
 
 ## Config de Ingesta
 
@@ -178,13 +171,10 @@ sources:
     cache_ttl_hours: 168  # 7 días
     rate_limit:
       max_calls_per_day: 100
-      delay_between_calls: 1.0
+      delay_between_calls: 7.0
   understat:
-    league: "La Liga"
+    league: "ESP-La Liga"   # soccerdata format
     season: "2024/2025"
-  fbref:
-    league: "La Liga"
-    season: "2024-2025"
 ```
 
 Cargado por un modelo Pydantic Settings en `src/pipeline/config.py`.
@@ -194,62 +184,63 @@ Cargado por un modelo Pydantic Settings en `src/pipeline/config.py`.
 | Componente | Tecnología |
 |------------|-----------|
 | Contenerización | Podman ([ADR-001](adr/001-podman-over-docker.md)) |
-| Orquestación | Apache Airflow 2.10 (TaskFlow API) |
-| Base de datos | PostgreSQL 16 (capa CLEAN) |
-| Exploración | Datasette + datasette-vega (capa ENRICHED) |
+| Orquestación | Apache Airflow 3.1.8 (TaskFlow API) |
+| Base de datos | PostgreSQL 18 (capa CLEAN) |
+| Exploración | Datasette + datasette-vega + datasette-render-image-tags (capa ENRICHED) |
 | Validación | Pydantic v2 |
 | Formato intermedio | Apache Parquet |
 | HTTP client | httpx (API-Football, con cache + rate limit) |
-| Scraping | soccerdata (Understat + FBref) |
+| Scraping | soccerdata (Understat) |
 | Fuzzy matching | rapidfuzz (entity resolution) |
-| Lenguaje | Python 3.11+ |
+| Lenguaje | Python 3.13+ |
 | Gestión de paquetes | uv + pyproject.toml |
 
 ## Estructura de Directorios
 
 ```
 football-data-pipeline/
+├── .agents/
+│   └── skills/                    # Agent skills (TDD, docs, review, etc.)
 ├── config/
-│   └── ingestion.yaml                 # Scope de ingesta (liga, temporada, endpoints)
+│   ├── ingestion.yaml             # Scope de ingesta (liga, temporada, endpoints)
+│   ├── datasette/                 # metadata.yml y assets estáticos
+│   └── sql/
+│       ├── init.sql               # DDL PostgreSQL (8 tablas)
+│       └── postgres-init.sh       # Script de inicialización del contenedor
 ├── dags/
-│   ├── ingest_api_football.py
-│   ├── ingest_understat.py
-│   ├── ingest_fbref.py
-│   ├── transform_clean.py
-│   ├── build_features.py
-│   └── enrich.py
-├── src/
-│   └── pipeline/
-│       ├── config.py                  # Pydantic Settings
-│       ├── models/                    # Modelos Pydantic (raw, clean, features)
-│       ├── loaders/                   # Módulos de ingesta por fuente
-│       ├── entity_resolution.py       # Fuzzy matching entre fuentes
-│       ├── feature_engineering.py     # Construcción de métricas derivadas
-│       └── observability.py           # Logging estructurado
-├── tests/
-│   ├── fixtures/                      # Payloads reales para tests
-│   ├── test_models.py
-│   ├── test_entity_resolution.py
-│   └── test_loaders.py
-├── data/
-│   ├── cache/                         # Cache JSON de API-Football
-│   ├── raw/                           # Capa RAW (Parquet)
-│   │   ├── api_football/
-│   │   ├── understat/
-│   │   └── fbref/
-│   └── features/                      # Capa FEATURES (Parquet)
-├── sql/
-│   └── init.sql                       # DDL PostgreSQL (8 tablas)
+│   ├── dag_ingest_api_football.py
+│   ├── dag_ingest_understat.py
+│   ├── dag_transform_clean.py
+│   ├── dag_build_features.py
+│   └── dag_export_enriched.py
 ├── docs/
-│   ├── adr/
-│   │   ├── 001-podman-over-docker.md
-│   │   ├── 002-data-source-selection.md
-│   │   └── 003-event-data-out-of-scope.md
-│   └── architecture.md                # Este documento
-├── docker-compose.yml                 # Stack: Airflow + PostgreSQL + Datasette
-├── Containerfile                      # Imagen base (OCI-compatible)
+│   ├── adr/                       # ADR-001 a ADR-006
+│   └── entity-resolution-spec.md  # Spec detallado de entity resolution
+├── src/pipeline/
+│   ├── config.py                  # Pydantic Settings + singleton
+│   ├── db.py                      # Conexión PostgreSQL
+│   ├── models/                    # raw.py, clean.py, features.py (Pydantic v2)
+│   ├── loaders/                   # api_football_loader + understat_loader
+│   ├── entity_resolution.py       # 4 pasadas + informe CSV
+│   ├── transform_clean.py         # RAW → CLEAN orchestration
+│   ├── feature_engineering.py     # Métricas derivadas
+│   └── observability.py           # Skeleton — logging estructurado
+├── tests/
+│   ├── fixtures/                  # Payloads reales para tests
+│   ├── conftest.py
+│   ├── test_config.py
+│   ├── test_api_football_loader.py
+│   ├── test_understat_loader.py
+│   ├── test_models_raw.py
+│   ├── test_entity_resolution.py
+│   ├── test_transform_clean.py
+│   ├── test_feature_engineering.py
+│   └── test_export_enriched.py
+├── Containerfile                  # Imagen OCI (Podman + Docker)
+├── compose.yml                    # 5 servicios: postgres, webserver, scheduler, dag-processor, datasette
 ├── pyproject.toml
 ├── .env.example
-├── .gitignore                         # data/ y cache/ excluidos
-└── README.md
+├── AGENTS.md
+├── CLAUDE.md
+└── .gitignore                     # data/ y cache/ excluidos
 ```
