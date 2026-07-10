@@ -17,7 +17,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from pipeline.config import ApiFootballConfig, RateLimitConfig
-from pipeline.loaders.api_football_loader import APIFootballError, APIFootballLoader
+from pipeline.loaders.api_football_loader import (
+    APIFootballError,
+    APIFootballLoader,
+    APIFootballPlanRestricted,
+)
 from pipeline.models.raw import (
     RawAPIFootballInjury,
     RawAPIFootballPlayer,
@@ -199,6 +203,42 @@ class TestRateLimiting:
 
         with pytest.raises(APIFootballError, match="API-Football error"):
             loader._make_request("players", {"league": 140, "page": 1, "season": 2024})
+
+    def test_plan_restriction_raises_actionable_error(self, tmp_path: Path) -> None:
+        error_response = {
+            "get": "teams",
+            "parameters": {},
+            "errors": {"plan": "Free plans do not have access to this season, try from 2022 to 2024."},
+            "results": 0,
+            "paging": {"current": 1, "total": 1},
+            "response": [],
+        }
+        client = _mock_client([error_response])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "bad-key", client=client)
+
+        with pytest.raises(APIFootballPlanRestricted, match="plan restriction") as exc_info:
+            loader._make_request("teams", {"league": 140, "season": 2025})
+        assert "2025" in str(exc_info.value)
+        assert "2022" in str(exc_info.value)
+
+    def test_page_limit_restriction_message(self, tmp_path: Path) -> None:
+        error_response = {
+            "get": "players",
+            "parameters": {},
+            "errors": {"plan": "Free plans are limited to a maximum value of 3 for the Page parameter"},
+            "results": 0,
+            "paging": {"current": 1, "total": 1},
+            "response": [],
+        }
+        client = _mock_client([error_response])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "bad-key", client=client)
+
+        with pytest.raises(APIFootballPlanRestricted, match="page") as exc_info:
+            loader._make_request("players", {"league": 140, "season": 2024, "team": 530, "page": 4})
+        assert "3" in str(exc_info.value)
+        assert "degrades gracefully" in str(exc_info.value)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -512,11 +552,12 @@ class TestPagination:
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
-        items = loader._paginate("players", {"league": 140, "season": 2024})
+        items, total_pages = loader._paginate("players", {"league": 140, "season": 2024})
 
         assert client.get.call_count == 3
         # 2 items per page × 3 pages = 6 items
         assert len(items) == 6
+        assert total_pages == 3
 
     def test_single_page_no_extra_calls(self, tmp_path: Path) -> None:
         fixture = _load_fixture("api_football_players_response.json")
@@ -525,10 +566,11 @@ class TestPagination:
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=client)
 
-        items = loader._paginate("players", {"league": 140, "season": 2024})
+        items, total_pages = loader._paginate("players", {"league": 140, "season": 2024})
 
         assert client.get.call_count == 1
         assert len(items) == 2
+        assert total_pages == 1
 
 
 # ─────────────────────────────────────────────────────────────
@@ -803,3 +845,160 @@ class TestContextManager:
         loader.close()
 
         client.close.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────
+# Fixture-based recovery (free-tier fallback)
+# ─────────────────────────────────────────────────────────────
+
+
+def _player_item(pid: int, name: str, *, appearences: int = 5) -> dict:
+    """Minimal but valid /players response item for *pid*."""
+    return {
+        "player": {
+            "id": pid,
+            "name": name,
+            "firstname": None,
+            "lastname": None,
+            "age": None,
+            "birth": {"date": None, "place": None, "country": None},
+            "nationality": None,
+            "height": None,
+            "weight": None,
+            "injured": False,
+            "photo": None,
+        },
+        "statistics": [
+            {
+                "team": {"id": 530, "name": "Atletico Madrid", "logo": ""},
+                "league": {"id": 140, "name": "La Liga", "country": "Spain", "logo": None, "flag": None, "season": 2024},
+                "games": {"appearences": appearences, "lineups": appearences, "minutes": appearences * 90, "number": None, "position": "Midfielder", "rating": "7.0", "captain": False},
+                "substitutes": {"in": 0, "out": 0, "bench": 0},
+                "shots": {"total": 1, "on": 1},
+                "goals": {"total": 1, "conceded": 0, "assists": 0, "saves": None},
+                "passes": {"total": 100, "key": 5, "accuracy": 80},
+                "tackles": {"total": 2, "blocks": 0, "interceptions": 1},
+                "duels": {"total": 5, "won": 3},
+                "dribbles": {"attempts": 2, "success": 1, "past": 0},
+                "fouls": {"drawn": 1, "committed": 1},
+                "cards": {"yellow": 0, "yellowred": 0, "red": 0},
+                "penalty": {"won": 0, "committed": 0, "scored": 0, "missed": 0, "saved": None},
+            }
+        ],
+    }
+
+
+def _players_page(total_pages: int, *items: dict) -> dict:
+    return {
+        "get": "players",
+        "parameters": {},
+        "errors": [],
+        "results": len(items),
+        "paging": {"current": 1, "total": total_pages},
+        "response": list(items),
+    }
+
+
+def _plan_error() -> dict:
+    return {
+        "get": "players",
+        "parameters": {},
+        "errors": {"plan": "Free plans are limited to a maximum value of 3 for the Page parameter"},
+        "results": 0,
+        "paging": {"current": 1, "total": 1},
+        "response": [],
+    }
+
+
+class TestFixtureBasedRecovery:
+    """Tests for the free-tier fallback that recovers truncated players via fixtures."""
+
+    def test_fetch_players_per_team_marks_truncated(self, tmp_path: Path) -> None:
+        # /players returns paging.total=4 (free-tier cap would block page 4)
+        page = _players_page(4, _player_item(1100, "Known Player"))
+        responses = [page, page, page, _plan_error()]
+        client = _mock_client(responses)
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        items, truncated = loader._fetch_players_per_team([530])
+
+        assert truncated == {530}
+        assert len(items) == 3  # pages 1-3 collected, page 4 blocked
+
+    def test_aggregate_fixture_stats_sums_and_averages(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=MagicMock())
+        s1 = {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "position": "Defender", "rating": "7.0"}, "shots": {"total": 2, "on": 1}, "goals": {"total": 1}, "passes": {"total": 50, "key": 3, "accuracy": 80}, "tackles": {"total": 5, "blocks": 1, "interceptions": 2}, "duels": {"total": 10, "won": 6}, "dribbles": {"attempts": 3, "success": 2, "past": 1}, "fouls": {"drawn": 2, "committed": 1}, "cards": {"yellow": 1}, "penalty": {"won": 1}}
+        s2 = {"games": {"appearences": 1, "lineups": 0, "minutes": 20, "position": "Defender", "rating": "6.0"}, "shots": {"total": 1, "on": 0}, "goals": {"total": 0}, "passes": {"total": 10, "key": 0, "accuracy": 70}, "tackles": {"total": 1}, "duels": {"total": 3, "won": 1}, "dribbles": {"attempts": 1, "success": 0, "past": 0}, "fouls": {"drawn": 0, "committed": 2}, "cards": {"yellow": 0}, "penalty": {"won": 0}}
+        agg = loader._aggregate_fixture_stats([s1, s2], player_id=777, team_id=530, team_name="Atletico Madrid", league_id=140, season=2024)
+        assert agg["games"]["appearances"] == 2
+        assert agg["games"]["minutes"] == 110
+        assert agg["games"]["position"] == "Defender"
+        assert abs(float(agg["games"]["rating"]) - 6.5) < 1e-6
+        assert agg["goals"]["total"] == 1
+        assert agg["shots"]["total"] == 3
+        assert agg["passes"]["total"] == 60
+        assert agg["passes"]["accuracy"] == 75
+        assert agg["tackles"]["total"] == 6
+        assert agg["cards"]["yellow"] == 1
+        assert agg["penalty"]["won"] == 1
+
+    def test_recover_truncated_players_via_fixtures(self, tmp_path: Path) -> None:
+        fixtures = _load_fixture("api_football_fixtures_response.json")
+        fp1 = _load_fixture("api_football_fixtures_players_9001.json")
+        fp2 = _load_fixture("api_football_fixtures_players_9002.json")
+        client = _mock_client([fixtures, fp1, fp2])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+        loader._truncated_team_ids = {530}
+        known = {1100}  # base /players already returned this one
+
+        players, stats = loader.recover_truncated_players(known)
+
+        assert len(players) == 1
+        assert players[0].player_id == 777
+        assert players[0].name == "Recovery Test"
+        assert 777 in known  # mutated in place
+        assert len(stats) == 1
+        assert stats[0].games.appearances == 2
+        assert stats[0].games.minutes == 110
+        assert abs(float(stats[0].games.rating) - 6.5) < 1e-6
+        assert stats[0].goals.total == 1
+        assert stats[0].passes.total == 60
+        assert stats[0].passes.accuracy == 75
+        # opponent player (999) must be ignored — different team_id
+        assert all(s.team_id == 530 for s in stats)
+
+    def test_recover_is_noop_when_nothing_truncated(self, tmp_path: Path) -> None:
+        client = _mock_client([])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+        loader._truncated_team_ids = set()
+
+        players, stats = loader.recover_truncated_players({1, 2, 3})
+
+        assert players == []
+        assert stats == []
+
+    def test_ingest_all_triggers_fixture_recovery(self, tmp_path: Path) -> None:
+        # Only players_stats endpoint so the mock sequence stays small.
+        config = _make_config(tmp_path, endpoints=("players_stats",))
+        # /players per team 530: 3 distinct players across pages 1-3, page 4
+        # blocked by the free-tier plan cap.
+        page1 = _players_page(4, _player_item(1100, "Base Player 1"))
+        page2 = _players_page(4, _player_item(1101, "Base Player 2"))
+        page3 = _players_page(4, _player_item(1102, "Base Player 3"))
+        fixtures = _load_fixture("api_football_fixtures_response.json")
+        fp1 = _load_fixture("api_football_fixtures_players_9001.json")
+        fp2 = _load_fixture("api_football_fixtures_players_9002.json")
+        responses = [page1, page2, page3, _plan_error(), fixtures, fp1, fp2]
+        client = _mock_client(responses)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        counts = loader.ingest_all(output_dir=tmp_path / "out", team_ids=[530])
+
+        # 3 base players (1100-1102) + 1 recovered via fixtures (777)
+        assert counts["players"] == 4
+        assert counts["player_stats"] == 4
+

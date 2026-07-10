@@ -21,7 +21,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pyarrow as pa
@@ -44,6 +47,21 @@ _BASE_URL = "https://v3.football.api-sports.io"
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 
+# Additive stat fields aggregated when reconstructing season totals from
+# per-fixture responses (see ``_aggregate_fixture_stats``).  Fields not listed
+# here (e.g. rating, accuracy) are averaged instead of summed.
+_AGGREGATE_ADDITIVE_FIELDS: dict[str, tuple[str, ...]] = {
+    "shots": ("total", "on"),
+    "goals": ("total", "conceded", "assists", "saves"),
+    "passes": ("total", "key"),
+    "tackles": ("total", "blocks", "interceptions"),
+    "duels": ("total", "won"),
+    "dribbles": ("attempts", "success", "past"),
+    "fouls": ("drawn", "committed"),
+    "cards": ("yellow", "yellowred", "red"),
+    "penalty": ("won", "committed", "scored", "missed", "saved"),
+}
+
 
 # ─────────────────────────────────────────────────────────────
 # Exception
@@ -52,6 +70,25 @@ _RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 
 class APIFootballError(Exception):
     """Raised when API-Football returns an error or is unreachable."""
+
+
+class APIFootballPlanRestricted(APIFootballError):
+    """Raised when the configured season is blocked by the API-Football plan.
+
+    Unlike a generic :class:`APIFootballError`, this signals a known, expected
+    limitation of the free tier (seasons are capped, e.g. 2022–2024) rather than
+    a transient failure.  Callers should surface the message to the operator
+    instead of retrying, since retrying cannot succeed for the same season.
+    """
+
+
+@dataclass
+class _FixtureRecoveryAcc:
+    """Accumulator for a single player during fixture-based recovery."""
+
+    player: dict
+    team_name: str
+    stats: list[dict]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -86,6 +123,11 @@ class APIFootballLoader:
         self._calls_made = 0
         self._cache_hits = 0
         self._last_call_time = 0.0
+        # Teams whose /players pagination was truncated by the free-tier page
+        # cap (paging.total > 3).  Used to trigger fixture-based recovery as a
+        # fallback.  Empty on paid plans (no truncation), so recovery is a
+        # no-op there.
+        self._truncated_team_ids: set[int] = set()
 
     def close(self) -> None:
         """Close the HTTP client if it was created internally."""
@@ -213,6 +255,35 @@ class APIFootballLoader:
                 logger.warning("Rate limit hit for %s %s — sleeping 65s then retrying", endpoint, params)
                 time.sleep(65)
                 return self._make_request(endpoint, params, force_refresh=force_refresh)
+            # Plan restriction: the free tier caps either the accessible season
+            # range (e.g. 2022-2024) or the ``page`` parameter (max 3 for
+            # /players).  This is permanent for the given request — raise a
+            # clear, actionable error instead of a cryptic API envelope dump.
+            # Note: pagination-triggered page limits are normally caught and
+            # tolerated by ``_paginate`` (partial data returned), but the
+            # message below still helps operators understand *why*.
+            plan_msg = errors_dict.get("plan")
+            if plan_msg:
+                is_page_limit = "page" in plan_msg.lower()
+                if is_page_limit:
+                    guidance = (
+                        "Free tier caps the 'page' parameter (max 3). "
+                        "Player data is truncated to the first 3 pages per query; "
+                        "this is expected on the free plan and the loader degrades gracefully. "
+                        "For complete player coverage, upgrade to a paid plan."
+                    )
+                else:
+                    guidance = (
+                        f"The configured season {self._config.season} is outside the "
+                        f"accessible range for the current plan. Use a season within the "
+                        f"allowed range, or upgrade to a paid plan."
+                    )
+                msg = (
+                    f"API-Football plan restriction: {plan_msg} {guidance} "
+                    f"(request: {endpoint} {params})"
+                )
+                logger.error(msg)
+                raise APIFootballPlanRestricted(msg)
             # errors can be a list or a dict depending on the error type
             msg = f"API-Football error for {endpoint} {params}: {api_errors}"
             logger.error(msg)
@@ -247,14 +318,19 @@ class APIFootballLoader:
         params: dict[str, str | int],
         *,
         force_refresh: bool = False,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], int]:
         """Fetch all pages for a paginated endpoint.
 
         Returns:
-            Flat list of all items from the ``response`` field across pages.
+            A tuple of ``(items, total_pages)`` where ``items`` is the flat
+            list of all ``response`` entries collected and ``total_pages`` is
+            the ``paging.total`` reported by the API (the last value observed
+            before any early stop).  ``total_pages`` lets callers detect
+            truncation when the free-tier page cap kicks in.
         """
         all_items: list[dict] = []
         page = 1
+        total_pages = 1
 
         while True:
             page_params = {**params, "page": page}
@@ -275,7 +351,7 @@ class APIFootballLoader:
                 break
             page += 1
 
-        return all_items
+        return all_items, total_pages
 
     # ─────────────────────────────────────────────────────────
     # Extraction: API JSON → Pydantic model dicts
@@ -484,13 +560,14 @@ class APIFootballLoader:
             Tuple of (validated players, validated player stats).
         """
         if team_ids:
-            raw_items = self._fetch_players_per_team(team_ids, force_refresh=force_refresh)
+            raw_items, truncated = self._fetch_players_per_team(team_ids, force_refresh=force_refresh)
+            self._truncated_team_ids = truncated
         else:
             params: dict[str, str | int] = {
                 "league": self._config.league_id,
                 "season": self._config.season,
             }
-            raw_items = self._paginate("players", params, force_refresh=force_refresh)
+            raw_items = self._paginate("players", params, force_refresh=force_refresh)[0]
 
         return self._parse_player_items(raw_items)
 
@@ -499,7 +576,7 @@ class APIFootballLoader:
         team_ids: list[int],
         *,
         force_refresh: bool = False,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], set[int]]:
         """Paginate ``/players`` per team to bypass the free-tier 3-page limit.
 
         Each team is queried independently (``?team={id}&season={}``).
@@ -509,14 +586,23 @@ class APIFootballLoader:
         player×team granularity.  Profile deduplication is handled downstream
         in ``_parse_player_items``.
 
+        Teams whose ``paging.total`` exceeds 3 are recorded as truncated: the
+        free-tier page cap prevents fetching their remaining players, so they
+        become candidates for fixture-based recovery (see
+        ``recover_truncated_players``).
+
         Args:
             team_ids: Team IDs to iterate over.
             force_refresh: If ``True``, skip cache lookup.
 
         Returns:
-            Flat list of raw response items (one per player×team).
+            A tuple of ``(items, truncated_team_ids)`` where ``items`` is the
+            flat list of raw response items (one per player×team) and
+            ``truncated_team_ids`` is the set of teams whose pagination was
+            cut short by the free-tier page cap.
         """
         all_items: list[dict] = []
+        truncated_team_ids: set[int] = set()
 
         for team_id in team_ids:
             params: dict[str, str | int] = {
@@ -524,15 +610,18 @@ class APIFootballLoader:
                 "season": self._config.season,
                 "team": team_id,
             }
-            team_items = self._paginate("players", params, force_refresh=force_refresh)
+            team_items, total_pages = self._paginate("players", params, force_refresh=force_refresh)
+            if total_pages > 3:
+                truncated_team_ids.add(team_id)
             all_items.extend(team_items)
 
         logger.info(
-            "Per-team fetch: %d teams queried, %d player×team items collected",
+            "Per-team fetch: %d teams queried, %d player×team items collected, %d truncated by page cap",
             len(team_ids),
             len(all_items),
+            len(truncated_team_ids),
         )
-        return all_items
+        return all_items, truncated_team_ids
 
     def _parse_player_items(
         self, raw_items: list[dict]
@@ -588,6 +677,283 @@ class APIFootballLoader:
             self._calls_made,
             self._cache_hits,
         )
+        return players, stats
+
+    # ─────────────────────────────────────────────────────────
+    # Fixture-based recovery (free-tier fallback)
+    # ─────────────────────────────────────────────────────────
+
+    def fetch_fixtures(self, team_id: int, *, force_refresh: bool = False) -> list[int]:
+        """Return all fixture IDs for a team/season (1 API call, paginated).
+
+        Used by ``ingest_players_from_fixtures`` to enumerate the matches from
+        which player statistics are reconstructed.
+        """
+        params = cast("dict[str, str | int]", {"team": team_id, "season": self._config.season})
+        items, _ = self._paginate("fixtures", params, force_refresh=force_refresh)
+        return [f["fixture"]["id"] for f in items if f.get("fixture", {}).get("id") is not None]
+
+    @staticmethod
+    def _aggregate_fixture_stats(
+        stat_list: list[dict],
+        *,
+        player_id: int,
+        team_id: int,
+        team_name: str,
+        league_id: int,
+        season: int,
+    ) -> dict:
+        """Reconstruct season-total statistics from per-fixture stat entries.
+
+        ``/fixtures/players`` returns one ``statistics[]`` entry *per match*,
+        whereas ``/players`` returns season totals.  This collapses the list
+        into a single season-total dict matching the ``RawAPIFootballPlayerStats``
+        shape: additive fields are summed, while ``rating`` and ``passes.accuracy``
+        are averaged (weighted by appearances) and identity fields take the
+        first non-null value.
+
+        Args:
+            stat_list: One ``statistics[0]`` dict per fixture the player featured in.
+            player_id/team_id/team_name/league_id/season: context for the row.
+
+        Returns:
+            A dict suitable for ``RawAPIFootballPlayerStats.model_validate``.
+        """
+        games_add = {"appearences": 0, "lineups": 0, "minutes": 0}
+        games_position: str | None = None
+        games_number: int | None = None
+        games_captain = False
+        ratings: list[float] = []
+        accuracies: list[int] = []
+        agg: dict[str, dict[str, int]] = {
+            cat: dict.fromkeys(fields, 0) for cat, fields in _AGGREGATE_ADDITIVE_FIELDS.items()
+        }
+
+        for s in stat_list:
+            g = s.get("games") or {}
+            for f in ("appearences", "lineups", "minutes"):
+                v = g.get(f)
+                if v is not None:
+                    games_add[f] += v
+            r = g.get("rating")
+            if r is not None:
+                with suppress(ValueError, TypeError):
+                    ratings.append(float(r))
+            a = s.get("passes", {}).get("accuracy")
+            if a is not None:
+                with suppress(ValueError, TypeError):
+                    accuracies.append(int(a))
+            if games_position is None and g.get("position"):
+                games_position = g.get("position")
+            if games_number is None and g.get("number") is not None:
+                games_number = g.get("number")
+            if g.get("captain"):
+                games_captain = True
+            for cat, fields in _AGGREGATE_ADDITIVE_FIELDS.items():
+                sc = s.get(cat) or {}
+                for f in fields:
+                    v = sc.get(f)
+                    if v is not None:
+                        agg[cat][f] += v
+
+        rating_avg = (sum(ratings) / len(ratings)) if ratings else None
+        accuracy_avg = (round(sum(accuracies) / len(accuracies))) if accuracies else None
+
+        return {
+            "player_id": player_id,
+            "team_id": team_id,
+            "team_name": team_name,
+            "league_id": league_id,
+            "season": season,
+            "games": {
+                "appearances": games_add["appearences"] or None,
+                "lineups": games_add["lineups"] or None,
+                "minutes": games_add["minutes"] or None,
+                "number": games_number,
+                "position": games_position,
+                "rating": (f"{rating_avg:.6f}" if rating_avg is not None else None),
+                "captain": games_captain,
+            },
+            "shots": {"total": agg["shots"]["total"] or None, "on": agg["shots"]["on"] or None},
+            "goals": {f: agg["goals"][f] or None for f in ("total", "conceded", "assists", "saves")},
+            "passes": {
+                "total": agg["passes"]["total"] or None,
+                "key": agg["passes"]["key"] or None,
+                "accuracy": accuracy_avg,
+            },
+            "tackles": {f: agg["tackles"][f] or None for f in ("total", "blocks", "interceptions")},
+            "duels": {f: agg["duels"][f] or None for f in ("total", "won")},
+            "dribbles": {f: agg["dribbles"][f] or None for f in ("attempts", "success", "past")},
+            "fouls": {f: agg["fouls"][f] or None for f in ("drawn", "committed")},
+            "cards": {f: agg["cards"][f] or None for f in ("yellow", "yellowred", "red")},
+            "penalty": {f: agg["penalty"][f] or None for f in ("won", "committed", "scored", "missed", "saved")},
+        }
+
+    def ingest_players_from_fixtures(
+        self,
+        team_id: int,
+        known_player_ids: set[int],
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
+        """Recover players truncated by the free-tier page cap, via fixtures.
+
+        For a team whose ``/players`` pagination was cut at page 3, this walks
+        every fixture and collects the players that ``/players`` never returned
+        (those beyond the page cap) from ``/fixtures/players``.  Their season
+        statistics are reconstructed by aggregating per-fixture entries.
+
+        This is a **fallback** for the free tier: on a paid plan ``/players``
+        returns all pages, ``self._truncated_team_ids`` is empty, and this is
+        never invoked.
+
+        Args:
+            team_id: Team whose truncated players should be recovered.
+            known_player_ids: Player IDs already obtained from ``/players``;
+                they are skipped to avoid duplicates.  Updated in place with
+                any recovered IDs.
+            force_refresh: If ``True``, skip cache lookup.
+
+        Returns:
+            Tuple of (recovered player profiles, recovered season stats).
+        """
+        fixture_ids = self.fetch_fixtures(team_id, force_refresh=force_refresh)
+
+        # pid -> accumulator: player info, team name, list of per-fixture stats
+        acc: dict[int, _FixtureRecoveryAcc] = {}
+
+        for fid in fixture_ids:
+            try:
+                data = self._make_request(
+                    "fixtures/players", cast("dict[str, str | int]", {"fixture": fid}), force_refresh=force_refresh
+                )
+            except APIFootballError as exc:
+                # Daily limit or transient error — stop recovery gracefully and
+                # report the gap rather than crashing the whole ingest.
+                logger.warning(
+                    "Fixture recovery stopped at fixture %d (team %d): %s", fid, team_id, exc
+                )
+                break
+            for block in data.get("response", []):
+                if block.get("team", {}).get("id") != team_id:
+                    continue
+                team_name = block.get("team", {}).get("name", "")
+                for entry in block.get("players", []):
+                    pid = entry.get("player", {}).get("id")
+                    if pid is None or pid in known_player_ids:
+                        continue
+                    rec = acc.setdefault(pid, _FixtureRecoveryAcc(entry["player"], team_name, []))
+                    stat_entries = entry.get("statistics") or [{}]
+                    if stat_entries:
+                        rec.stats.append(stat_entries[0])
+
+        players: list[RawAPIFootballPlayer] = []
+        stats: list[RawAPIFootballPlayerStats] = []
+        rejected = 0
+
+        for pid, rec in acc.items():
+            pinfo = rec.player
+            name = pinfo.get("name") or f"player-{pid}"
+            parts = name.split(" ", 1)
+            firstname = parts[0] if len(parts) > 1 else None
+            lastname = parts[1] if len(parts) > 1 else None
+            try:
+                player_model = RawAPIFootballPlayer(
+                    player_id=pid,
+                    name=name,
+                    firstname=firstname,
+                    lastname=lastname,
+                    photo_url=pinfo.get("photo"),
+                )
+            except (ValidationError, KeyError) as exc:
+                logger.warning("Rejected recovered player %s: %s", pid, exc)
+                rejected += 1
+                continue
+
+            if not rec.stats:
+                players.append(player_model)
+                known_player_ids.add(pid)
+                continue
+
+            try:
+                stat_dict = self._aggregate_fixture_stats(
+                    rec.stats,
+                    player_id=pid,
+                    team_id=team_id,
+                    team_name=rec.team_name,
+                    league_id=self._config.league_id,
+                    season=self._config.season,
+                )
+                stat_model = RawAPIFootballPlayerStats.model_validate(stat_dict)
+            except (ValidationError, KeyError) as exc:
+                logger.warning("Rejected recovered stats for player %s: %s", pid, exc)
+                rejected += 1
+                continue
+
+            players.append(player_model)
+            stats.append(stat_model)
+            known_player_ids.add(pid)
+
+        logger.info(
+            "Fixture recovery for team %d: %d players, %d stats, %d rejected, %d fixtures scanned",
+            team_id,
+            len(players),
+            len(stats),
+            rejected,
+            len(fixture_ids),
+        )
+        return players, stats
+
+    def recover_truncated_players(
+        self,
+        known_player_ids: set[int],
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
+        """Recover players for every team truncated by the free-tier page cap.
+
+        Iterates ``self._truncated_team_ids`` (populated by ``ingest_players``)
+        and delegates to ``ingest_players_from_fixtures``.  Stops gracefully if
+        the daily API limit is hit mid-recovery so the pipeline still completes
+        with whatever was recovered.
+
+        Args:
+            known_player_ids: Player IDs already obtained from ``/players``
+                (mutated in place as players are recovered).
+            force_refresh: If ``True``, skip cache lookup.
+
+        Returns:
+            Tuple of (recovered player profiles, recovered season stats).
+        """
+        players: list[RawAPIFootballPlayer] = []
+        stats: list[RawAPIFootballPlayerStats] = []
+
+        if not self._truncated_team_ids:
+            return players, stats
+
+        for team_id in sorted(self._truncated_team_ids):
+            try:
+                recovered_players, recovered_stats = self.ingest_players_from_fixtures(
+                    team_id, known_player_ids, force_refresh=force_refresh
+                )
+            except APIFootballError as exc:
+                logger.warning("Stopping fixture recovery at team %d: %s", team_id, exc)
+                break
+            players.extend(recovered_players)
+            stats.extend(recovered_stats)
+
+        if players:
+            logger.info(
+                "Fixture-based recovery: %d players / %d stats recovered for %d truncated teams",
+                len(players),
+                len(stats),
+                len(self._truncated_team_ids),
+            )
+        else:
+            logger.info(
+                "Fixture-based recovery: no additional players recovered (%d truncated teams)",
+                len(self._truncated_team_ids),
+            )
         return players, stats
 
     def ingest_injuries(self, *, force_refresh: bool = False) -> list[RawAPIFootballInjury]:
@@ -802,6 +1168,15 @@ class APIFootballLoader:
 
         if "players_stats" in endpoints:
             players, stats = self.ingest_players(team_ids=team_ids, force_refresh=force_refresh)
+            # Fallback (free tier only): if the page cap truncated some teams,
+            # recover their missing players from fixtures. On a paid plan this
+            # is a no-op because no team is truncated.
+            if self._truncated_team_ids:
+                recovered_players, recovered_stats = self.recover_truncated_players(
+                    {p.player_id for p in players}, force_refresh=force_refresh
+                )
+                players = players + recovered_players
+                stats = stats + recovered_stats
             self.save_parquet(players, out / "players.parquet")
             self.save_parquet(stats, out / "player_stats.parquet")
             counts["players"] = len(players)

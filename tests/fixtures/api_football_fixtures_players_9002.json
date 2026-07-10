@@ -1,0 +1,31 @@
+{
+  "get": "fixtures/players",
+  "parameters": {"fixture": "9002"},
+  "errors": [],
+  "results": 2,
+  "paging": {"current": 1, "total": 1},
+  "response": [
+    {
+      "team": {"id": 530, "name": "Atletico Madrid"},
+      "players": [
+        {
+          "player": {"id": 777, "name": "Recovery Test", "pos": "Defender", "photo": "https://media.api-sports.io/football/players/777.png"},
+          "statistics": [
+            {"games": {"appearences": 1, "lineups": 0, "minutes": 20, "number": 15, "position": "Defender", "rating": "6.0", "captain": false}, "offsides": 0, "shots": {"total": 1, "on": 0}, "goals": {"total": 0, "conceded": 0, "assists": 0, "saves": null}, "passes": {"total": 10, "key": 0, "accuracy": 70}, "tackles": {"total": 1, "blocks": 0, "interceptions": 0}, "duels": {"total": 3, "won": 1}, "dribbles": {"attempts": 1, "success": 0, "past": 0}, "fouls": {"drawn": 0, "committed": 2}, "cards": {"yellow": 0, "yellowred": 0, "red": 0}, "penalty": {"won": 0, "committed": 0, "scored": 0, "missed": 0, "saved": null}}
+          ]
+        }
+      ]
+    },
+    {
+      "team": {"id": 541, "name": "Opponent"},
+      "players": [
+        {
+          "player": {"id": 999, "name": "Opp Player", "pos": "Forward", "photo": "https://media.api-sports.io/football/players/999.png"},
+          "statistics": [
+            {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "number": 9, "position": "Forward", "rating": "6.8", "captain": false}, "offsides": 0, "shots": {"total": 1, "on": 0}, "goals": {"total": 0, "conceded": 0, "assists": 0, "saves": null}, "passes": {"total": 20, "key": 0, "accuracy": 60}, "tackles": {"total": 0, "blocks": 0, "interceptions": 0}, "duels": {"total": 2, "won": 1}, "dribbles": {"attempts": 1, "success": 0, "past": 0}, "fouls": {"drawn": 1, "committed": 1}, "cards": {"yellow": 0, "yellowred": 0, "red": 0}, "penalty": {"won": 0, "committed": 0, "scored": 0, "missed": 0, "saved": null}}
+          ]
+        }
+      ]
+    }
+  ]
+}

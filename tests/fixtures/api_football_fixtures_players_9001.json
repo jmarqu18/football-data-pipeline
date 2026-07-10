@@ -1,0 +1,37 @@
+{
+  "get": "fixtures/players",
+  "parameters": {"fixture": "9001"},
+  "errors": [],
+  "results": 2,
+  "paging": {"current": 1, "total": 1},
+  "response": [
+    {
+      "team": {"id": 530, "name": "Atletico Madrid"},
+      "players": [
+        {
+          "player": {"id": 1100, "name": "Pedro Gonzalez Lopez", "pos": "Midfielder", "photo": "https://media.api-sports.io/football/players/1100.png"},
+          "statistics": [
+            {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "number": 10, "position": "Midfielder", "rating": "7.5", "captain": false}, "offsides": 0, "shots": {"total": 2, "on": 1}, "goals": {"total": 0, "conceded": 0, "assists": 1, "saves": null}, "passes": {"total": 40, "key": 2, "accuracy": 85}, "tackles": {"total": 2, "blocks": 0, "interceptions": 1}, "duels": {"total": 5, "won": 3}, "dribbles": {"attempts": 2, "success": 1, "past": 0}, "fouls": {"drawn": 1, "committed": 1}, "cards": {"yellow": 0, "yellowred": 0, "red": 0}, "penalty": {"won": 0, "committed": 0, "scored": 0, "missed": 0, "saved": null}}
+          ]
+        },
+        {
+          "player": {"id": 777, "name": "Recovery Test", "pos": "Defender", "photo": "https://media.api-sports.io/football/players/777.png"},
+          "statistics": [
+            {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "number": 15, "position": "Defender", "rating": "7.0", "captain": false}, "offsides": 0, "shots": {"total": 2, "on": 1}, "goals": {"total": 1, "conceded": 0, "assists": 0, "saves": null}, "passes": {"total": 50, "key": 3, "accuracy": 80}, "tackles": {"total": 5, "blocks": 1, "interceptions": 2}, "duels": {"total": 10, "won": 6}, "dribbles": {"attempts": 3, "success": 2, "past": 1}, "fouls": {"drawn": 2, "committed": 1}, "cards": {"yellow": 1, "yellowred": 0, "red": 0}, "penalty": {"won": 1, "committed": 0, "scored": 0, "missed": 0, "saved": null}}
+          ]
+        }
+      ]
+    },
+    {
+      "team": {"id": 541, "name": "Opponent"},
+      "players": [
+        {
+          "player": {"id": 999, "name": "Opp Player", "pos": "Forward", "photo": "https://media.api-sports.io/football/players/999.png"},
+          "statistics": [
+            {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "number": 9, "position": "Forward", "rating": "6.5", "captain": false}, "offsides": 1, "shots": {"total": 3, "on": 2}, "goals": {"total": 1, "conceded": 0, "assists": 0, "saves": null}, "passes": {"total": 30, "key": 1, "accuracy": 70}, "tackles": {"total": 1, "blocks": 0, "interceptions": 0}, "duels": {"total": 4, "won": 2}, "dribbles": {"attempts": 2, "success": 1, "past": 0}, "fouls": {"drawn": 1, "committed": 2}, "cards": {"yellow": 0, "yellowred": 0, "red": 0}, "penalty": {"won": 0, "committed": 0, "scored": 0, "missed": 0, "saved": null}}
+          ]
+        }
+      ]
+    }
+  ]
+}
