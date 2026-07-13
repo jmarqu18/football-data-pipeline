@@ -17,8 +17,19 @@
 # ── §1 Configuración ──────────────────────────────────────────────────────────
 
 # Auto-detección del motor de contenedores: Podman tiene prioridad sobre Docker.
-CONTAINER_ENGINE := $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
-COMPOSE          := $(shell command -v podman-compose >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+# En Windows, chocolatey `make` usa cmd.exe por defecto, que no entiende las
+# recetas POSIX de este Makefile ([ -f .env ], grep, $(shell ...)). Forzamos el
+# shell de git-bash, que resuelve los ejecutables de Windows (uv, podman,
+# podman-compose) y hereda el PATH de Windows, de modo que todos los targets
+# funcionan. La detección usa .exe porque `command -v` en bash no aplica PATHEXT.
+ifeq ($(OS),Windows_NT)
+  SHELL            := C:/PROGRA~1/Git/bin/bash.exe
+  CONTAINER_ENGINE := $(shell command -v podman.exe >/dev/null 2>&1 && echo podman || echo docker)
+  COMPOSE          := $(shell command -v podman-compose.exe >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+else
+  CONTAINER_ENGINE := $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+  COMPOSE          := $(shell command -v podman-compose >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+endif
 
 # Servicio donde se ejecutan los comandos Airflow CLI.
 AIRFLOW_SVC := airflow-scheduler
