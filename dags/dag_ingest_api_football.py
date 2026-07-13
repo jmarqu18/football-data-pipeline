@@ -61,6 +61,14 @@ def ingest_api_football() -> None:
 
         with APIFootballLoader(config=cfg, api_key=api_key) as loader:
             players, stats = loader.ingest_players(team_ids=team_ids)
+            # Free-tier fallback: if /players was truncated by the page cap
+            # (paging.total > 3), recover the missing players from
+            # /fixtures/players. No-op on a paid plan, where no team is
+            # truncated and _truncated_team_ids stays empty.
+            if loader._truncated_team_ids:
+                recovered_players, recovered_stats = loader.recover_truncated_players({p.player_id for p in players})
+                players = players + recovered_players
+                stats = stats + recovered_stats
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
         APIFootballLoader.save_parquet(players, _RAW_DIR / "players.parquet")
