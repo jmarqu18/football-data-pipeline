@@ -278,10 +278,7 @@ class APIFootballLoader:
                         f"accessible range for the current plan. Use a season within the "
                         f"allowed range, or upgrade to a paid plan."
                     )
-                msg = (
-                    f"API-Football plan restriction: {plan_msg} {guidance} "
-                    f"(request: {endpoint} {params})"
-                )
+                msg = f"API-Football plan restriction: {plan_msg} {guidance} (request: {endpoint} {params})"
                 logger.error(msg)
                 raise APIFootballPlanRestricted(msg)
             # errors can be a list or a dict depending on the error type
@@ -684,14 +681,19 @@ class APIFootballLoader:
     # ─────────────────────────────────────────────────────────
 
     def fetch_fixtures(self, team_id: int, *, force_refresh: bool = False) -> list[int]:
-        """Return all fixture IDs for a team/season (1 API call, paginated).
+        """Return all fixture IDs for a team/season (1 API call).
 
         Used by ``ingest_players_from_fixtures`` to enumerate the matches from
         which player statistics are reconstructed.
+
+        Note: the ``/fixtures`` list endpoint rejects the ``page`` parameter
+        (API-Football returns ``The Page field do not exist``), so this is a
+        single, non-paginated request. A team's season fixtures across all
+        competitions fit in one response (``paging.total == 1``).
         """
         params = cast("dict[str, str | int]", {"team": team_id, "season": self._config.season})
-        items, _ = self._paginate("fixtures", params, force_refresh=force_refresh)
-        return [f["fixture"]["id"] for f in items if f.get("fixture", {}).get("id") is not None]
+        data = self._make_request("fixtures", params, force_refresh=force_refresh)
+        return [f["fixture"]["id"] for f in data.get("response", []) if f.get("fixture", {}).get("id") is not None]
 
     @staticmethod
     def _aggregate_fixture_stats(
@@ -830,9 +832,7 @@ class APIFootballLoader:
             except APIFootballError as exc:
                 # Daily limit or transient error — stop recovery gracefully and
                 # report the gap rather than crashing the whole ingest.
-                logger.warning(
-                    "Fixture recovery stopped at fixture %d (team %d): %s", fid, team_id, exc
-                )
+                logger.warning("Fixture recovery stopped at fixture %d (team %d): %s", fid, team_id, exc)
                 break
             for block in data.get("response", []):
                 if block.get("team", {}).get("id") != team_id:

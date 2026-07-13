@@ -871,8 +871,23 @@ def _player_item(pid: int, name: str, *, appearences: int = 5) -> dict:
         "statistics": [
             {
                 "team": {"id": 530, "name": "Atletico Madrid", "logo": ""},
-                "league": {"id": 140, "name": "La Liga", "country": "Spain", "logo": None, "flag": None, "season": 2024},
-                "games": {"appearences": appearences, "lineups": appearences, "minutes": appearences * 90, "number": None, "position": "Midfielder", "rating": "7.0", "captain": False},
+                "league": {
+                    "id": 140,
+                    "name": "La Liga",
+                    "country": "Spain",
+                    "logo": None,
+                    "flag": None,
+                    "season": 2024,
+                },
+                "games": {
+                    "appearences": appearences,
+                    "lineups": appearences,
+                    "minutes": appearences * 90,
+                    "number": None,
+                    "position": "Midfielder",
+                    "rating": "7.0",
+                    "captain": False,
+                },
                 "substitutes": {"in": 0, "out": 0, "bench": 0},
                 "shots": {"total": 1, "on": 1},
                 "goals": {"total": 1, "conceded": 0, "assists": 0, "saves": None},
@@ -926,12 +941,57 @@ class TestFixtureBasedRecovery:
         assert truncated == {530}
         assert len(items) == 3  # pages 1-3 collected, page 4 blocked
 
+    def test_fetch_fixtures_omits_page_param(self, tmp_path: Path) -> None:
+        # The /fixtures list endpoint rejects the `page` parameter
+        # ("The Page field do not exist"), so it must not be sent.
+        fixtures = {
+            "get": "fixtures",
+            "parameters": {},
+            "errors": [],
+            "results": 0,
+            "paging": {"current": 1, "total": 1},
+            "response": [],
+        }
+        client = _mock_client([fixtures])
+        config = _make_config(tmp_path)
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        loader.fetch_fixtures(530)
+
+        args, kwargs = client.get.call_args
+        assert args[0] == "/fixtures"
+        assert "page" not in kwargs.get("params", {})
+
     def test_aggregate_fixture_stats_sums_and_averages(self, tmp_path: Path) -> None:
         config = _make_config(tmp_path)
         loader = APIFootballLoader(config, "test-key", client=MagicMock())
-        s1 = {"games": {"appearences": 1, "lineups": 1, "minutes": 90, "position": "Defender", "rating": "7.0"}, "shots": {"total": 2, "on": 1}, "goals": {"total": 1}, "passes": {"total": 50, "key": 3, "accuracy": 80}, "tackles": {"total": 5, "blocks": 1, "interceptions": 2}, "duels": {"total": 10, "won": 6}, "dribbles": {"attempts": 3, "success": 2, "past": 1}, "fouls": {"drawn": 2, "committed": 1}, "cards": {"yellow": 1}, "penalty": {"won": 1}}
-        s2 = {"games": {"appearences": 1, "lineups": 0, "minutes": 20, "position": "Defender", "rating": "6.0"}, "shots": {"total": 1, "on": 0}, "goals": {"total": 0}, "passes": {"total": 10, "key": 0, "accuracy": 70}, "tackles": {"total": 1}, "duels": {"total": 3, "won": 1}, "dribbles": {"attempts": 1, "success": 0, "past": 0}, "fouls": {"drawn": 0, "committed": 2}, "cards": {"yellow": 0}, "penalty": {"won": 0}}
-        agg = loader._aggregate_fixture_stats([s1, s2], player_id=777, team_id=530, team_name="Atletico Madrid", league_id=140, season=2024)
+        s1 = {
+            "games": {"appearences": 1, "lineups": 1, "minutes": 90, "position": "Defender", "rating": "7.0"},
+            "shots": {"total": 2, "on": 1},
+            "goals": {"total": 1},
+            "passes": {"total": 50, "key": 3, "accuracy": 80},
+            "tackles": {"total": 5, "blocks": 1, "interceptions": 2},
+            "duels": {"total": 10, "won": 6},
+            "dribbles": {"attempts": 3, "success": 2, "past": 1},
+            "fouls": {"drawn": 2, "committed": 1},
+            "cards": {"yellow": 1},
+            "penalty": {"won": 1},
+        }
+        s2 = {
+            "games": {"appearences": 1, "lineups": 0, "minutes": 20, "position": "Defender", "rating": "6.0"},
+            "shots": {"total": 1, "on": 0},
+            "goals": {"total": 0},
+            "passes": {"total": 10, "key": 0, "accuracy": 70},
+            "tackles": {"total": 1},
+            "duels": {"total": 3, "won": 1},
+            "dribbles": {"attempts": 1, "success": 0, "past": 0},
+            "fouls": {"drawn": 0, "committed": 2},
+            "cards": {"yellow": 0},
+            "penalty": {"won": 0},
+        }
+        agg = loader._aggregate_fixture_stats(
+            [s1, s2], player_id=777, team_id=530, team_name="Atletico Madrid", league_id=140, season=2024
+        )
         assert agg["games"]["appearances"] == 2
         assert agg["games"]["minutes"] == 110
         assert agg["games"]["position"] == "Defender"
@@ -1001,4 +1061,3 @@ class TestFixtureBasedRecovery:
         # 3 base players (1100-1102) + 1 recovered via fixtures (777)
         assert counts["players"] == 4
         assert counts["player_stats"] == 4
-
