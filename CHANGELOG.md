@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- **Fail-closed de secretos en `compose.yml`**: `FERNET_KEY`, `AIRFLOW__API__SECRET_KEY` y
+  `AIRFLOW__API_AUTH__JWT_SECRET` usan `${VAR:?...}` en lugar de los defaults adivinables
+  `dev-jwt-secret-change-in-prod` / `dev-secret-key-change-in-prod`. `make up` ahora aborta con
+  un mensaje claro si `.env` no define los secretos, en vez de correr inseguro en silencio.
+- **`make rotate-secrets` (nuevo)**: genera y hace upsert de los 3 secretos en `.env` de forma
+  idempotente (preserva `API_FOOTBALL_KEY`) vía `scripts/generate_airflow_secrets.py`.
+  `make init` también usa el script. Ambos aceptan `PYTHON='uv run python'` para entornos con uv.
+- Resuelve el `InsecureKeyLengthWarning` de Airflow 3.x (JWT secret 29 → 86 bytes). Al rotar el
+  JWT secret, las sesiones de la UI se invalidan y requieren re-login (admin/admin).
+
+### Fixed
+- `make init` / `make rotate-secrets` ya no fallan en git-bash (Windows): la generación de
+  secretos se movió de `python -c "..."` (que git-bash malinterpreta por el `;` y los
+  paréntesis dentro de `$(...)`) a `scripts/generate_airflow_secrets.py`.
+
 ## [0.1.0] — 2026-07-07
 
 ### Added
