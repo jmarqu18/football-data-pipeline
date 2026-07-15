@@ -16,9 +16,24 @@
 
 # ── §1 Configuración ──────────────────────────────────────────────────────────
 
+# Intérprete de Python para los targets de setup (init/rotate-secrets).
+# Por defecto python3; en entornos con uv: make init PYTHON="uv run python"
+PYTHON ?= python3
+
 # Auto-detección del motor de contenedores: Podman tiene prioridad sobre Docker.
-CONTAINER_ENGINE := $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
-COMPOSE          := $(shell command -v podman-compose >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+# En Windows, chocolatey `make` usa cmd.exe por defecto, que no entiende las
+# recetas POSIX de este Makefile ([ -f .env ], grep, $(shell ...)). Forzamos el
+# shell de git-bash, que resuelve los ejecutables de Windows (uv, podman,
+# podman-compose) y hereda el PATH de Windows, de modo que todos los targets
+# funcionan. La detección usa .exe porque `command -v` en bash no aplica PATHEXT.
+ifeq ($(OS),Windows_NT)
+  SHELL            := C:/PROGRA~1/Git/bin/bash.exe
+  CONTAINER_ENGINE := $(shell command -v podman.exe >/dev/null 2>&1 && echo podman || echo docker)
+  COMPOSE          := $(shell command -v podman-compose.exe >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+else
+  CONTAINER_ENGINE := $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+  COMPOSE          := $(shell command -v podman-compose >/dev/null 2>&1 && echo podman-compose || echo "docker compose")
+endif
 
 # Servicio donde se ejecutan los comandos Airflow CLI.
 AIRFLOW_SVC := airflow-scheduler
@@ -77,17 +92,17 @@ init: ## Genera .env con claves de seguridad a partir de .env.example
 	fi
 	@cp .env.example .env
 	@printf "$(CYAN)→  Generando claves de seguridad...$(RESET)\n"
-	@FERNET=$$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") && \
-	 JWT=$$(python3 -c "import secrets; print(secrets.token_urlsafe(64))") && \
-	 API_SECRET=$$(python3 -c "import secrets; print(secrets.token_hex(32))") && \
-	 sed -i "s|^# FERNET_KEY=.*|FERNET_KEY=$$FERNET|" .env && \
-	 sed -i "s|^# AIRFLOW__API__SECRET_KEY=.*|AIRFLOW__API__SECRET_KEY=$$API_SECRET|" .env && \
-	 sed -i "s|^# AIRFLOW__API_AUTH__JWT_SECRET=.*|AIRFLOW__API_AUTH__JWT_SECRET=$$JWT|" .env && \
-	 printf "  $(GREEN)✓  Fernet key, API secret y JWT secret generados$(RESET)\n"
+	@$(PYTHON) scripts/generate_airflow_secrets.py
 	@printf "$(CYAN)→  Introduce tu API_FOOTBALL_KEY: $(RESET)"; \
 	 read key; sed -i "s|^API_FOOTBALL_KEY=.*|API_FOOTBALL_KEY=$$key|" .env
 	@printf "$(GREEN)✓  .env configurado correctamente$(RESET)\n"
 	@printf "   Siguiente paso: $(BOLD)make up$(RESET)\n"
+
+.PHONY: rotate-secrets
+rotate-secrets: ## Rota los secretos de Airflow en .env (upsert idempotente, conserva API_FOOTBALL_KEY)
+	@if [ ! -f .env ]; then printf "$(RED)✗  Falta .env — ejecuta: make init$(RESET)\n"; exit 1; fi
+	@printf "$(CYAN)→  Generando secretos de Airflow...$(RESET)\n"
+	@$(PYTHON) scripts/generate_airflow_secrets.py
 
 .PHONY: env-check
 env-check: ## Verifica que .env existe y API_FOOTBALL_KEY está configurada

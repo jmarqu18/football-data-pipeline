@@ -7,14 +7,14 @@ x-airflow-common:
   build: .
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=}
+    AIRFLOW__CORE__FERNET_KEY: "${FERNET_KEY:?FERNET_KEY no definido — genera .env con 'make init' o 'make rotate-secrets'}"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
-    AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-dev-secret-key-change-in-prod}
+    AIRFLOW__API__SECRET_KEY: "${AIRFLOW__API__SECRET_KEY:?AIRFLOW__API__SECRET_KEY no definido — genera .env con 'make init' o 'make rotate-secrets'}"
     # Airflow 3.x: secreto compartido para firma JWT entre todos los contenedores.
     # Sin esto, cada contenedor genera su propio secreto aleatorio → Signature verification failed.
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-dev-jwt-secret-change-in-prod}
+    AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW__API_AUTH__JWT_SECRET:?AIRFLOW__API_AUTH__JWT_SECRET no definido — genera .env con 'make init' o 'make rotate-secrets'}"
     # Airflow 3.x: LocalExecutor se comunica con el api-server via httpx.
     # Sin esta URL, el executor intenta localhost:8080 → Connection refused.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"

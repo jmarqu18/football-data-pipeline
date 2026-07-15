@@ -183,7 +183,6 @@ class TestPlayerSeasonExtraction:
             "league_id",
             "season_id",
             "team_id",
-            "position",
             "np_goals",
             "np_xg",
             "matches",

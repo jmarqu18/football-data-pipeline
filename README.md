@@ -173,8 +173,8 @@ Dispara las dos ingestas en paralelo y muestra los pasos siguientes en orden. Cu
 | ---- | ------------------------ | ------------------------------- | ------------------------------------- |
 | 1    | `make pipeline-full`     | ingest_api_football + understat | Ingesta paralela de ambas fuentes     |
 | 2    | `make pipeline-clean`    | transform_clean                 | RAW → CLEAN con entity resolution     |
-| 3    | `make pipeline-features` | build_features                  | CLEAN → FEATURES (skeleton)           |
-| 4    | `make pipeline-enrich`   | export_enriched                 | FEATURES → ENRICHED SQLite (skeleton) |
+| 3    | `make pipeline-features` | build_features                  | CLEAN → FEATURES Parquet              |
+| 4    | `make pipeline-enrich`   | export_enriched                 | FEATURES → ENRICHED SQLite + Datasette|
 
 Datasette disponible en `http://localhost:8001` tras completar el paso 4.
 
@@ -465,9 +465,14 @@ football-data-pipeline/
 │   └── observability.py
 ├── tests/
 │   ├── fixtures/                # JSON payloads reales de cada API
-│   ├── test_models.py
+│   ├── test_config.py
+│   ├── test_api_football_loader.py
+│   ├── test_understat_loader.py
+│   ├── test_models_raw.py
 │   ├── test_entity_resolution.py
-│   └── test_loaders.py
+│   ├── test_transform_clean.py
+│   ├── test_feature_engineering.py
+│   └── test_export_enriched.py
 ├── Containerfile                # Imagen OCI compatible con Podman y Docker
 ├── compose.yml
 ├── pyproject.toml
@@ -479,11 +484,14 @@ football-data-pipeline/
 
 ## Decisiones de arquitectura (ADRs)
 
-| ADR                                                | Decisión                                                                        | Estado   |
-| -------------------------------------------------- | ------------------------------------------------------------------------------- | -------- |
-| [ADR-001](docs/adr/001-podman-over-docker.md)      | Podman sobre Docker: rootless, daemonless, OCI-compliant                        | Aceptado |
-| [ADR-002](docs/adr/002-data-source-selection.md)   | Understat + API-Football; FBref descartado por solapamiento post-Opta           | Aceptado |
-| [ADR-003](docs/adr/003-event-data-out-of-scope.md) | Event data fuera de scope; StatsBomb Open Data solo cubre temporadas históricas | Aceptado |
+| ADR                                                | Decisión                                                                                   | Estado   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------- |
+| [ADR-001](docs/adr/001-podman-over-docker.md)      | Podman sobre Docker: rootless, daemonless, OCI-compliant                                   | Aceptado |
+| [ADR-002](docs/adr/002-data-source-selection.md)   | Understat + API-Football; FBref descartado por solapamiento post-Opta                      | Aceptado |
+| [ADR-003](docs/adr/003-event-data-out-of-scope.md) | Event data fuera de scope; StatsBomb Open Data solo cubre temporadas históricas            | Aceptado |
+| [ADR-004](docs/adr/004-entity-resolution-strategy.md) | Entity resolution en 4 pasadas: equipos primero, luego jugadores (exact → fuzzy → contextual → statistical) | Aceptado |
+| [ADR-005](docs/adr/005-airflow-3x-taskflow.md)     | Airflow 3.x con TaskFlow API para orquestación; DAG processor separado                     | Aceptado |
+| [ADR-006](docs/adr/006-four-layer-data-architecture.md) | Arquitectura de 4 capas: RAW (Parquet) → CLEAN (PostgreSQL) → FEATURES (Parquet) → ENRICHED (SQLite/Datasette) | Aceptado |
 
 **Nota sobre Podman y Docker:** los `Containerfile` son estándar OCI. Si se prefiere Docker:
 
@@ -502,18 +510,19 @@ Los comandos son intercambiables. El fichero se llama `compose.yml` (sin prefijo
 | `src/pipeline/config.py`                      | Completo — YAML config + Pydantic Settings + singleton          |
 | `src/pipeline/models/raw.py`                  | Completo — modelos para API-Football y Understat                |
 | `src/pipeline/models/clean.py`                | Completo — modelos para output de entity resolution             |
-| `src/pipeline/models/features.py`             | Por implementar                                                 |
+| `src/pipeline/models/features.py`             | Completo — modelo PlayerSeasonFeatures                          |
 | `src/pipeline/loaders/api_football_loader.py` | Completo — httpx + cache + rate limit + retry exponencial       |
 | `src/pipeline/loaders/understat_loader.py`    | Completo — soccerdata wrapper + validación Pydantic             |
 | `src/pipeline/entity_resolution.py`           | Completo — 4 pasadas + informe CSV                              |
 | `src/pipeline/transform_clean.py`             | Completo — Parquet read + entity resolution + PostgreSQL insert |
-| `src/pipeline/feature_engineering.py`         | Skeleton                                                        |
-| `src/pipeline/observability.py`               | Skeleton                                                        |
-| `dags/dag_ingest_api_football.py`             | Completo — TaskFlow API, 3 tasks                                |
+| `src/pipeline/feature_engineering.py`         | Completo — 7 funciones de feature engineering                   |
+| `src/pipeline/export_enriched.py`             | Completo — flat view + shots table + SQLite export              |
+| `src/pipeline/observability.py`               | Completo — `get_logger()` (NullHandler) + `configure_logging()` |
+| `dags/dag_ingest_api_football.py`             | Completo — TaskFlow API, 5 tasks                                |
 | `dags/dag_ingest_understat.py`                | Completo — TaskFlow API, 2 tasks                                |
 | `dags/dag_transform_clean.py`                 | Completo — RAW → CLEAN + entity resolution + PostgreSQL         |
-| `dags/dag_build_features.py`                  | Skeleton                                                        |
-| `dags/dag_export_enriched.py`                 | Skeleton                                                        |
+| `dags/dag_build_features.py`                  | Completo — TaskFlow API, 1 task                                 |
+| `dags/dag_export_enriched.py`                 | Completo — TaskFlow API, 1 task                                 |
 | `config/sql/init.sql`                         | Completo — DDL PostgreSQL 8 tablas                              |
 
 ---

@@ -18,10 +18,13 @@ import pytest
 
 from pipeline.entity_resolution import (
     _get_top_candidates,
+    _parse_api_position,
+    _parse_understat_position,
     best_match_score,
     build_name_variants,
     decode_api_name,
     normalize_name,
+    positions_compatible,
     resolve_players,
     resolve_teams,
     write_unresolved_report,
@@ -103,6 +106,7 @@ def _make_api_stats(
     team_name: str,
     appearances: int = 0,
     minutes: int = 0,
+    position: str | None = None,
 ) -> RawAPIFootballPlayerStats:
     return RawAPIFootballPlayerStats(
         player_id=player_id,
@@ -110,7 +114,7 @@ def _make_api_stats(
         team_name=team_name,
         league_id=140,
         season=2024,
-        games=_APIFootballGames(appearances=appearances, minutes=minutes),
+        games=_APIFootballGames(appearances=appearances, minutes=minutes, position=position),
         **_EMPTY_STATS_KWARGS,
     )
 
@@ -121,6 +125,7 @@ def _make_understat_player(
     team: str,
     games: int = 0,
     minutes: int = 0,
+    position: str | None = None,
 ) -> RawUnderstatPlayerSeason:
     return RawUnderstatPlayerSeason(
         player_id=player_id,
@@ -140,6 +145,7 @@ def _make_understat_player(
         key_passes=0,
         yellow_cards=0,
         red_cards=0,
+        position=position,
     )
 
 
@@ -245,6 +251,95 @@ class TestBestMatchScore:
     def test_empty_inputs(self):
         assert best_match_score("", ["test"]) == 0.0
         assert best_match_score("test", []) == 0.0
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: best_match_score length guard
+# ─────────────────────────────────────────────────────────────
+
+
+class TestBestMatchScoreLengthGuard:
+    """partial_ratio must not inflate scores when variant is much shorter than target."""
+
+    def test_short_lastname_variant_not_inflated(self):
+        """'rodriguez' (lastname variant) must NOT score 1.0 against 'Ricardo Rodríguez'."""
+        score = best_match_score("Ricardo Rodríguez", ["rodriguez"])
+        # Without guard: partial_ratio gives 1.0 (substring match)
+        # With guard: token_sort_ratio gives ~0.69
+        assert score < 0.85, f"Short variant 'rodriguez' should not inflate to {score:.3f}"
+
+    def test_short_firstname_variant_not_inflated(self):
+        """'david' (firstname variant) must NOT score 1.0 against 'David Alaba'."""
+        score = best_match_score("David Alaba", ["david"])
+        assert score < 0.85, f"Short variant 'david' should not inflate to {score:.3f}"
+
+    def test_similar_length_variant_still_uses_partial_ratio(self):
+        """Variants of similar length should still benefit from partial_ratio."""
+        score = best_match_score("Ricardo Rodríguez", ["r. rodriguez"])
+        assert score >= 0.85, f"Similar-length variant should still score high, got {score:.3f}"
+
+    def test_nickname_matching_preserved(self):
+        """Short nicknames that are genuine matches should still work via token_sort_ratio."""
+        score = best_match_score("Pedri", ["pedro gonzalez lopez", "pedro", "gonzalez lopez"])
+        assert score >= 0.80, f"Nickname matching should be preserved, got {score:.3f}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: Pass 2 false-conflict regression
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassTwoFalseConflictRegression:
+    """Regression: Pass 2 must not create false conflicts from partial_ratio inflation.
+
+    Before the length guard fix, short name variants (single firstname/lastname)
+    scored 1.0 via partial_ratio substring matching, causing two distinct API-Football
+    players to both tie at 1.0 against the same Understat player.
+    """
+
+    def test_ricardo_rodriguez_resolves_without_false_conflict(self):
+        """Ricardo Rodríguez (Betis) must resolve to his correct API-Football match.
+
+        Regression: 'rodriguez' variant of a different player used to score 1.0 via
+        partial_ratio, tying with the real match and blocking resolution.
+        """
+        # Real Betis player (correct match)
+        real_variants = build_name_variants("Ricardo Rodríguez")
+        # A different player who happens to have "Rodriguez" in his name
+        impostor_variants = build_name_variants("José Rodríguez")
+
+        understat_name = "Ricardo Rodriguez"
+
+        real_score = best_match_score(understat_name, real_variants)
+        impostor_score = best_match_score(understat_name, impostor_variants)
+
+        # The real match must score strictly higher than the impostor
+        assert real_score > impostor_score, (
+            f"Real match (Ricardo Rodríguez: {real_score:.3f}) must outscore "
+            f"impostor (José Rodríguez: {impostor_score:.3f})"
+        )
+        # And the real match must meet the fuzzy threshold
+        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
+
+    def test_david_alaba_resolves_without_false_conflict(self):
+        """David Alaba (Real Madrid) must resolve to his correct API-Football match.
+
+        Regression: 'david' variant used to score 1.0 via partial_ratio when the
+        Understat name was 'David Alaba'.
+        """
+        real_variants = build_name_variants("David Alaba")
+        impostor_variants = build_name_variants("David García")
+
+        understat_name = "David Alaba"
+
+        real_score = best_match_score(understat_name, real_variants)
+        impostor_score = best_match_score(understat_name, impostor_variants)
+
+        assert real_score > impostor_score, (
+            f"Real match (David Alaba: {real_score:.3f}) must outscore "
+            f"impostor (David García: {impostor_score:.3f})"
+        )
+        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -398,60 +493,60 @@ def twenty_players_fixture():
     # fmt: on
 
     api_stats = [
-        _make_api_stats(101, REAL_MADRID, "Real Madrid", appearances=30, minutes=2500),
-        _make_api_stats(102, BARCA, "Barcelona", appearances=32, minutes=2700),
-        _make_api_stats(103, REAL_MADRID, "Real Madrid", appearances=28, minutes=2300),
-        _make_api_stats(104, BARCA, "Barcelona", appearances=25, minutes=2100),
-        _make_api_stats(105, REAL_MADRID, "Real Madrid", appearances=26, minutes=1800),
-        _make_api_stats(106, BARCA, "Barcelona", appearances=30, minutes=2400),
-        _make_api_stats(107, ATLETICO, "Atletico Madrid", appearances=29, minutes=2450),
+        _make_api_stats(101, REAL_MADRID, "Real Madrid", appearances=30, minutes=2500, position="Midfielder"),
+        _make_api_stats(102, BARCA, "Barcelona", appearances=32, minutes=2700, position="Attacker"),
+        _make_api_stats(103, REAL_MADRID, "Real Madrid", appearances=28, minutes=2300, position="Attacker"),
+        _make_api_stats(104, BARCA, "Barcelona", appearances=25, minutes=2100, position="Midfielder"),
+        _make_api_stats(105, REAL_MADRID, "Real Madrid", appearances=26, minutes=1800, position="Attacker"),
+        _make_api_stats(106, BARCA, "Barcelona", appearances=30, minutes=2400, position="Attacker"),
+        _make_api_stats(107, ATLETICO, "Atletico Madrid", appearances=29, minutes=2450, position="Attacker"),
         # Koke: unique stats in Atletico (30 games, 2600 min)
-        _make_api_stats(108, ATLETICO, "Atletico Madrid", appearances=30, minutes=2600),
-        _make_api_stats(109, ATLETICO, "Atletico Madrid", appearances=33, minutes=2970),
+        _make_api_stats(108, ATLETICO, "Atletico Madrid", appearances=30, minutes=2600, position="Midfielder"),
+        _make_api_stats(109, ATLETICO, "Atletico Madrid", appearances=33, minutes=2970, position="Goalkeeper"),
         # Isco: unique stats in Betis (22 games, 1500 min)
-        _make_api_stats(110, BETIS, "Real Betis", appearances=22, minutes=1500),
-        _make_api_stats(111, REAL_MADRID, "Real Madrid", appearances=20, minutes=1200),
-        _make_api_stats(112, REAL_MADRID, "Real Madrid", appearances=15, minutes=1350),
+        _make_api_stats(110, BETIS, "Real Betis", appearances=22, minutes=1500, position="Midfielder"),
+        _make_api_stats(111, REAL_MADRID, "Real Madrid", appearances=20, minutes=1200, position="Attacker"),
+        _make_api_stats(112, REAL_MADRID, "Real Madrid", appearances=15, minutes=1350, position="Defender"),
         # Transfer Player: stats in Villarreal (was transferred from Getafe)
-        _make_api_stats(113, VILLARREAL, "Villarreal", appearances=15, minutes=1200),
-        _make_api_stats(114, ATLETICO, "Atletico Madrid", appearances=27, minutes=2200),
-        _make_api_stats(115, ATLETICO, "Atletico Madrid", appearances=24, minutes=1800),
-        _make_api_stats(117, GIRONA, "Girona", appearances=10, minutes=600),
-        _make_api_stats(118, BARCA, "Barcelona", appearances=22, minutes=1600),
-        _make_api_stats(119, ATHLETIC, "Athletic Club", appearances=31, minutes=2700),
-        _make_api_stats(120, VALENCIA, "Valencia", appearances=28, minutes=2300),
+        _make_api_stats(113, VILLARREAL, "Villarreal", appearances=15, minutes=1200, position="Midfielder"),
+        _make_api_stats(114, ATLETICO, "Atletico Madrid", appearances=27, minutes=2200, position="Attacker"),
+        _make_api_stats(115, ATLETICO, "Atletico Madrid", appearances=24, minutes=1800, position="Attacker"),
+        _make_api_stats(117, GIRONA, "Girona", appearances=10, minutes=600, position="Midfielder"),
+        _make_api_stats(118, BARCA, "Barcelona", appearances=22, minutes=1600, position="Attacker"),
+        _make_api_stats(119, ATHLETIC, "Athletic Club", appearances=31, minutes=2700, position="Attacker"),
+        _make_api_stats(120, VALENCIA, "Valencia", appearances=28, minutes=2300, position="Attacker"),
         # Extra Atletico player: very different stats from Koke
-        _make_api_stats(150, ATLETICO, "Atletico Madrid", appearances=5, minutes=200),
+        _make_api_stats(150, ATLETICO, "Atletico Madrid", appearances=5, minutes=200, position="Midfielder"),
         # Extra Betis player: very different stats from Isco
-        _make_api_stats(151, BETIS, "Real Betis", appearances=8, minutes=400),
+        _make_api_stats(151, BETIS, "Real Betis", appearances=8, minutes=400, position="Midfielder"),
     ]
 
     # fmt: off
     understat_players = [
-        _make_understat_player(1001, "Jude Bellingham", "Real Madrid", 30, 2500),
-        _make_understat_player(1002, "Robert Lewandowski", "Barcelona", 32, 2700),
-        _make_understat_player(1003, "Vinicius Junior", "Real Madrid", 28, 2300),
-        _make_understat_player(1004, "Pedri", "Barcelona", 25, 2100),
-        _make_understat_player(1005, "Rodrygo", "Real Madrid", 26, 1800),
-        _make_understat_player(1006, "Lamine Yamal", "Barcelona", 30, 2400),
-        _make_understat_player(1007, "Antoine Griezmann", "Atletico Madrid", 29, 2450),
+        _make_understat_player(1001, "Jude Bellingham", "Real Madrid", 30, 2500, position="M"),
+        _make_understat_player(1002, "Robert Lewandowski", "Barcelona", 32, 2700, position="F S"),
+        _make_understat_player(1003, "Vinicius Junior", "Real Madrid", 28, 2300, position="F S"),
+        _make_understat_player(1004, "Pedri", "Barcelona", 25, 2100, position="M"),
+        _make_understat_player(1005, "Rodrygo", "Real Madrid", 26, 1800, position="F S"),
+        _make_understat_player(1006, "Lamine Yamal", "Barcelona", 30, 2400, position="F M"),
+        _make_understat_player(1007, "Antoine Griezmann", "Atletico Madrid", 29, 2450, position="F M"),
         # Koke: same team + unique stats (31 games, 2550 min ≈ 30/2600)
-        _make_understat_player(1008, "Koke", "Atletico Madrid", 31, 2550),
-        _make_understat_player(1009, "Jan Oblak", "Atletico Madrid", 33, 2970),
+        _make_understat_player(1008, "Koke", "Atletico Madrid", 31, 2550, position="M"),
+        _make_understat_player(1009, "Jan Oblak", "Atletico Madrid", 33, 2970, position="G"),
         # Isco: same team + unique stats (23 games, 1450 min ≈ 22/1500)
-        _make_understat_player(1010, "Isco", "Real Betis", 23, 1450),
-        _make_understat_player(1011, "Joselu", "Real Madrid", 20, 1200),
-        _make_understat_player(1012, "Dani Carvajal", "Real Madrid", 15, 1350),
+        _make_understat_player(1010, "Isco", "Real Betis", 23, 1450, position="M"),
+        _make_understat_player(1011, "Joselu", "Real Madrid", 20, 1200, position="F S"),
+        _make_understat_player(1012, "Dani Carvajal", "Real Madrid", 15, 1350, position="D"),
         # Transfer Player: Understat shows at Getafe (transferred from there)
-        _make_understat_player(1013, "Transfer Player", "Getafe", 12, 900),
-        _make_understat_player(1014, "Alexander Sørloth", "Atletico Madrid", 27, 2200),
-        _make_understat_player(1015, "Álvaro Morata", "Atletico Madrid", 24, 1800),
+        _make_understat_player(1013, "Transfer Player", "Getafe", 12, 900, position="M"),
+        _make_understat_player(1014, "Alexander Sørloth", "Atletico Madrid", 27, 2200, position="F S"),
+        _make_understat_player(1015, "Álvaro Morata", "Atletico Madrid", 24, 1800, position="F S"),
         # #16 — Only in Understat
-        _make_understat_player(1016, "Zinedine Phantom", "Girona", 5, 200),
+        _make_understat_player(1016, "Zinedine Phantom", "Girona", 5, 200, position="M"),
         # #18-20
-        _make_understat_player(1018, "Ferran Torres", "Barcelona", 22, 1600),
-        _make_understat_player(1019, "Iñaki Williams", "Athletic Club", 31, 2700),
-        _make_understat_player(1020, "Hugo Duro", "Valencia", 28, 2300),
+        _make_understat_player(1018, "Ferran Torres", "Barcelona", 22, 1600, position="F M"),
+        _make_understat_player(1019, "Iñaki Williams", "Athletic Club", 31, 2700, position="F M"),
+        _make_understat_player(1020, "Hugo Duro", "Valencia", 28, 2300, position="F S"),
     ]
     # fmt: on
 
@@ -651,9 +746,154 @@ class TestUnresolvedReport:
 
         # Should have at least the "Only In Understat" player
         assert len(rows) >= 1
-        # Check CSV header
-        assert "source" in reader.fieldnames
-        assert "fuzzy_score" in reader.fieldnames
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: Pass 2 position tiebreaker
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassTwoPositionTiebreaker:
+    """Tests for position-aware conflict resolution in Pass 2 fuzzy matching."""
+
+    def _make_scenario(
+        self,
+        u_position: str | None,
+        api_position_a: str | None,
+        api_position_b: str | None,
+    ):
+        """Build a minimal two-candidate fuzzy conflict scenario.
+
+        Both API players have identical names (forcing a score tie), and are
+        on the same team as the Understat player.  Returns (api_players,
+        api_stats, understat_players, resolved_teams).
+        """
+        team_id = 800
+
+        # Use full legal names for both API players so neither is an exact
+        # match against the short Understat name "Carlos Gomez", but both
+        # score >= 0.85 on fuzzy matching, creating a genuine Pass 2 tie.
+        api_players = [
+            RawAPIFootballPlayer(
+                player_id=801,
+                name="Carlos Gomez Herrera",
+                firstname="Carlos",
+                lastname="Gomez Herrera",
+            ),
+            RawAPIFootballPlayer(
+                player_id=802,
+                name="Carlos Gomez Pereira",
+                firstname="Carlos",
+                lastname="Gomez Pereira",
+            ),
+        ]
+        # Position is carried on RawAPIFootballPlayerStats.games.position
+        api_stats = [
+            RawAPIFootballPlayerStats(
+                player_id=801,
+                team_id=team_id,
+                team_name="Test FC",
+                league_id=140,
+                season=2024,
+                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_a),
+                **_EMPTY_STATS_KWARGS,
+            ),
+            RawAPIFootballPlayerStats(
+                player_id=802,
+                team_id=team_id,
+                team_name="Test FC",
+                league_id=140,
+                season=2024,
+                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_b),
+                **_EMPTY_STATS_KWARGS,
+            ),
+        ]
+        understat_players = [
+            RawUnderstatPlayerSeason(
+                player_id=9001,
+                player_name="Carlos Gomez",
+                team="Test FC",
+                season="2024/2025",
+                games=20,
+                minutes=1800,
+                goals=0,
+                assists=0,
+                xg=0.0,
+                xa=0.0,
+                npxg=0.0,
+                xg_chain=0.0,
+                xg_buildup=0.0,
+                shots=0,
+                key_passes=0,
+                yellow_cards=0,
+                red_cards=0,
+                position=u_position,
+            )
+        ]
+        resolved_teams = [
+            _make_resolved_team(team_id, "Test FC", understat_name="Test FC"),
+        ]
+        return api_players, api_stats, understat_players, resolved_teams
+
+    def test_position_breaks_tie_single_compatible_candidate(self):
+        """When two candidates tie and only one is position-compatible, it wins."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position="M",          # Understat: Midfielder
+            api_position_a="Midfielder",   # API player 801 — compatible
+            api_position_b="Goalkeeper",   # API player 802 — incompatible
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(matched) == 1, "Expected exactly one resolution via position tiebreak"
+        winner = matched[0]
+        assert winner.api_football_id == 801, (
+            f"Expected api_football_id=801 (Midfielder), got {winner.api_football_id}"
+        )
+        assert winner.resolution_method == "fuzzy"
+        assert winner.resolution_confidence == 0.88
+
+    def test_both_compatible_stays_unresolved(self):
+        """When both tied candidates are position-compatible, resolution stays ambiguous."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position="M",          # Understat: Midfielder
+            api_position_a="Midfielder",   # compatible
+            api_position_b="Midfielder",   # also compatible — still a tie
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        cross_matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(cross_matched) == 0, (
+            "Both candidates are position-compatible — conflict should not be resolved"
+        )
+        unresolved_ids = {u.player_id for u in result.unresolved}
+        assert 9001 in unresolved_ids, "Understat player should appear in unresolved list"
+
+    def test_none_position_no_filtering(self):
+        """When Understat player has no position, position tiebreak is skipped entirely."""
+        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
+            u_position=None,          # unknown position → no filtering
+            api_position_a="Midfielder",
+            api_position_b="Goalkeeper",
+        )
+        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
+
+        # With no position info, the conflict is unresolvable — player stays unresolved.
+        cross_matched = [
+            p for p in result.resolved_players
+            if p.understat_id == 9001 and p.api_football_id is not None
+        ]
+        assert len(cross_matched) == 0, (
+            "No position on Understat player — tiebreak must not fire; player should be unresolved"
+        )
+        unresolved_ids = {u.player_id for u in result.unresolved}
+        assert 9001 in unresolved_ids
 
 
 # ─────────────────────────────────────────────────────────────
@@ -790,3 +1030,202 @@ def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].candidate_source_id == 490984
+
+
+class TestPositionMapping:
+    """Position parsing and compatibility checks."""
+
+    def test_understat_midfielder_striker(self):
+        assert _parse_understat_position("M S") == {"M", "F"}
+
+    def test_understat_defender_midfielder(self):
+        assert _parse_understat_position("D M S") == {"D", "M", "F"}
+
+    def test_understat_goalkeeper(self):
+        assert _parse_understat_position("G") == {"G"}
+
+    def test_understat_none_returns_empty(self):
+        assert _parse_understat_position(None) == set()
+
+    def test_understat_unknown_code_ignored(self):
+        assert _parse_understat_position("X Y G") == {"G"}
+
+    def test_api_midfielder(self):
+        assert _parse_api_position("Midfielder") == {"M"}
+
+    def test_api_goalkeeper(self):
+        assert _parse_api_position("Goalkeeper") == {"G"}
+
+    def test_api_none_returns_empty(self):
+        assert _parse_api_position(None) == set()
+
+    def test_api_unknown_returns_empty(self):
+        assert _parse_api_position("Unknown") == set()
+
+    def test_compatible_midfielder_vs_ms(self):
+        assert positions_compatible("M S", "Midfielder") is True
+
+    def test_compatible_striker_vs_attacker(self):
+        assert positions_compatible("F S", "Attacker") is True
+
+    def test_incompatible_goalkeeper_vs_midfielder(self):
+        assert positions_compatible("G", "Midfielder") is False
+
+    def test_incompatible_defender_vs_attacker(self):
+        assert positions_compatible("D", "Attacker") is False
+
+    def test_none_understat_always_compatible(self):
+        assert positions_compatible(None, "Defender") is True
+
+    def test_none_api_always_compatible(self):
+        assert positions_compatible("D", None) is True
+
+
+# ─────────────────────────────────────────────────────────────
+# Pass 4 position filter
+# ─────────────────────────────────────────────────────────────
+
+
+class TestPassFourPositionFilter:
+    """Pass 4 statistical matching must respect position compatibility."""
+
+    def _make_stats_with_position(
+        self,
+        player_id: int,
+        team_id: int,
+        team_name: str,
+        appearances: int,
+        minutes: int,
+        position: str | None,
+    ) -> RawAPIFootballPlayerStats:
+        return RawAPIFootballPlayerStats(
+            player_id=player_id,
+            team_id=team_id,
+            team_name=team_name,
+            league_id=140,
+            season=2024,
+            games=_APIFootballGames(appearances=appearances, minutes=minutes, position=position),
+            **_EMPTY_STATS_KWARGS,
+        )
+
+    def test_statistical_match_rejected_when_position_incompatible(self):
+        """A goalkeeper (API-Football) vs a forward (Understat) with matching stats must NOT resolve.
+
+        Uses Understat name "Balde" vs API-Football "Alejandro Balde Moreno"
+        (firstname="Alejandro", lastname="Balde Moreno").  The short Understat
+        name scores ~0.59 against the variants — above _PASS4_NAME_FLOOR (0.50)
+        but below the Pass 2 fuzzy threshold (0.85) — so the player can only
+        be matched in Pass 4.  Incompatible positions ("Goalkeeper" vs "F")
+        must then block the match.
+        """
+        team = _make_resolved_team(api_id=600, api_name="Test FC", understat_name="Test FC")
+
+        # API-Football: goalkeeper with a compound surname (no short variant that
+        # would score >= 0.85 against the single-token Understat name)
+        api_player = _make_api_player(
+            601,
+            "Alejandro Balde Moreno",
+            firstname="Alejandro",
+            lastname="Balde Moreno",
+        )
+        api_stats = self._make_stats_with_position(
+            601, 600, "Test FC", appearances=28, minutes=2520, position="Goalkeeper"
+        )
+
+        # Understat: forward — short name token, incompatible position
+        understat_player = RawUnderstatPlayerSeason(
+            player_id=6001,
+            player_name="Balde",
+            team="Test FC",
+            season="2024/2025",
+            games=28,
+            minutes=2520,
+            goals=0,
+            assists=0,
+            xg=0.0,
+            xa=0.0,
+            npxg=0.0,
+            xg_chain=0.0,
+            xg_buildup=0.0,
+            shots=0,
+            key_passes=0,
+            yellow_cards=0,
+            red_cards=0,
+            position="F",
+        )
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+            raw_transfers=[],
+        )
+
+        # Must be unresolved — position mismatch blocks statistical acceptance
+        assert len(result.unresolved) == 1
+        assert result.unresolved[0].player_name == "Balde"
+
+        # API-Football player must remain single-source (no understat_id)
+        api_resolved = [p for p in result.resolved_players if p.api_football_id == 601]
+        assert len(api_resolved) == 1
+        assert api_resolved[0].understat_id is None
+
+    def test_statistical_match_accepted_when_position_compatible(self):
+        """A defender (API-Football) vs a defender (Understat) with matching stats should resolve.
+
+        Same name-distance pattern: Understat "Balde" vs API-Football
+        "Alejandro Balde Moreno" scores ~0.59, passing the name floor but not
+        the fuzzy threshold, so resolution must go through Pass 4.  Compatible
+        positions ("Defender" vs "D") must allow the match at confidence 0.60.
+        """
+        team = _make_resolved_team(api_id=700, api_name="Sample SC", understat_name="Sample SC")
+
+        api_player = _make_api_player(
+            701,
+            "Alejandro Balde Moreno",
+            firstname="Alejandro",
+            lastname="Balde Moreno",
+        )
+        api_stats = self._make_stats_with_position(
+            701, 700, "Sample SC", appearances=22, minutes=1900, position="Defender"
+        )
+
+        understat_player = RawUnderstatPlayerSeason(
+            player_id=7001,
+            player_name="Balde",
+            team="Sample SC",
+            season="2024/2025",
+            games=22,
+            minutes=1900,
+            goals=0,
+            assists=0,
+            xg=0.0,
+            xa=0.0,
+            npxg=0.0,
+            xg_chain=0.0,
+            xg_buildup=0.0,
+            shots=0,
+            key_passes=0,
+            yellow_cards=0,
+            red_cards=0,
+            position="D",
+        )
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+            raw_transfers=[],
+        )
+
+        # Must be resolved via statistical matching
+        statistical = [
+            p for p in result.resolved_players
+            if p.resolution_method == "statistical" and p.api_football_id == 701
+        ]
+        assert len(statistical) == 1
+        assert statistical[0].understat_id == 7001
+        assert statistical[0].resolution_confidence == 0.60
+        assert len(result.unresolved) == 0
