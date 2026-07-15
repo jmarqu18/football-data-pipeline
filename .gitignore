@@ -18,6 +18,9 @@ AGENTS.md
 **/plans/
 skills-lock.json
 
+# Planning scratch (tasks/plan.md, tasks/todo.md — working output, not source)
+tasks/
+
 # Environment
 .env
 
