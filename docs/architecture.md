@@ -224,7 +224,7 @@ football-data-pipeline/
 │   ├── entity_resolution.py       # 4 pasadas + informe CSV
 │   ├── transform_clean.py         # RAW → CLEAN orchestration
 │   ├── feature_engineering.py     # Métricas derivadas
-│   └── observability.py           # Skeleton — logging estructurado
+│   └── observability.py           # logging estructurado + config central (get_logger/configure_logging)
 ├── tests/
 │   ├── fixtures/                  # Payloads reales para tests
 │   ├── conftest.py

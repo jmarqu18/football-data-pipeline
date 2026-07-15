@@ -517,7 +517,7 @@ Los comandos son intercambiables. El fichero se llama `compose.yml` (sin prefijo
 | `src/pipeline/transform_clean.py`             | Completo — Parquet read + entity resolution + PostgreSQL insert |
 | `src/pipeline/feature_engineering.py`         | Completo — 7 funciones de feature engineering                   |
 | `src/pipeline/export_enriched.py`             | Completo — flat view + shots table + SQLite export              |
-| `src/pipeline/observability.py`               | Skeleton — solo `from __future__ import annotations`            |
+| `src/pipeline/observability.py`               | Completo — `get_logger()` (NullHandler) + `configure_logging()` |
 | `dags/dag_ingest_api_football.py`             | Completo — TaskFlow API, 5 tasks                                |
 | `dags/dag_ingest_understat.py`                | Completo — TaskFlow API, 2 tasks                                |
 | `dags/dag_transform_clean.py`                 | Completo — RAW → CLEAN + entity resolution + PostgreSQL         |

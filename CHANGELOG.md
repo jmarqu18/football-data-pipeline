@@ -15,5 +15,5 @@
 - 6 ADRs documentando todas las decisiones arquitectónicas.
 
 ### Known issues
-- `observability.py` es esqueleto — solo contiene `from __future__ import annotations`.
-- `docs/architecture.md` contiene referencias a FBref (eliminado en ADR-002); usar README + ADRs como referencia canónica.
+- _(sin issues conocidos)_ — `observability.py` completado (logging centralizado) y las
+  referencias obsoletas a FBref ya fueron eliminadas de la documentación.
