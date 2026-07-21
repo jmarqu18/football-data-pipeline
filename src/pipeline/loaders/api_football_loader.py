@@ -1013,11 +1013,18 @@ class APIFootballLoader:
         rejected = 0
 
         for team_id in team_ids:
-            data = self._make_request(
-                "transfers",
-                {"team": team_id},
-                force_refresh=force_refresh,
-            )
+            try:
+                data = self._make_request(
+                    "transfers",
+                    {"team": team_id},
+                    force_refresh=force_refresh,
+                )
+            except APIFootballError as exc:
+                # A restricted endpoint (e.g. /transfers on the free plan) or a
+                # transient/daily-limit error must not crash the whole ingest.
+                # Skip the team and continue so the task still succeeds.
+                logger.warning("Skipping transfers for team %d: %s", team_id, exc)
+                continue
             for player_entry in data.get("response", []):
                 player_id = player_entry["player"]["id"]
                 player_name = player_entry["player"]["name"]
