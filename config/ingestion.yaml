@@ -7,7 +7,7 @@ sources:
       - injuries          # League-level: ~1 call (no pagination)
       - transfers         # Per-team: ~20 calls (1 per team)
     cache_dir: data/cache/api_football
-    cache_ttl_hours: 168  # 7 days
+    cache_ttl_hours: 720  # PROVISIONAL: 30 días para completar la recuperación sin que expiren los caches viejos. Volver a 168 tras cerrar los equipos truncados.
     rate_limit:
       max_calls_per_day: 100
       delay_between_calls: 7.0  # seconds — free plan: 10 req/min → ≥6s between calls
