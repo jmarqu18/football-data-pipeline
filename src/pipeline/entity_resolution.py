@@ -13,7 +13,7 @@ import csv
 import html
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from rapidfuzz import fuzz
@@ -230,6 +230,27 @@ def resolve_teams(
 # ─────────────────────────────────────────────────────────────
 
 
+def _parse_birth_date(raw_birth_date: str | None) -> date | None:
+    """Convert an API-Football ISO birth date string into a date.
+
+    API-Football returns birth dates as ISO strings ("2002-11-25"); the CLEAN
+    layer stores them as dates. Doing the conversion here keeps the RAW→CLEAN
+    transformation visible instead of leaving it to Pydantic coercion.
+
+    Args:
+        raw_birth_date: ISO date string from RawAPIFootballPlayer, or None.
+
+    Returns:
+        The parsed date, or None when the source has no birth date.
+
+    Raises:
+        ValueError: If the string is not a valid ISO date.
+    """
+    if raw_birth_date is None:
+        return None
+    return date.fromisoformat(raw_birth_date)
+
+
 def _build_team_mapping(
     resolved_teams: list[ResolvedTeam],
 ) -> dict[str, int]:
@@ -369,7 +390,7 @@ def resolve_players(
         api_p: RawAPIFootballPlayer,
         u_p: RawUnderstatPlayerSeason,
         confidence: float,
-        method: str,
+        method: ResolutionMethod,
     ) -> ResolvedPlayer:
         decoded_name = decode_api_name(api_p.name)
         return ResolvedPlayer(
@@ -377,7 +398,7 @@ def resolve_players(
             known_name=u_p.player_name if u_p.player_name != decoded_name else None,
             api_football_id=api_p.player_id,
             understat_id=u_p.player_id,
-            birth_date=api_p.birth_date,
+            birth_date=_parse_birth_date(api_p.birth_date),
             nationality=api_p.nationality,
             photo_url=api_p.photo_url,
             resolution_confidence=confidence,
@@ -604,7 +625,7 @@ def resolve_players(
                 known_name=None,
                 api_football_id=api_p.player_id,
                 understat_id=None,
-                birth_date=api_p.birth_date,
+                birth_date=_parse_birth_date(api_p.birth_date),
                 nationality=api_p.nationality,
                 photo_url=api_p.photo_url,
                 resolution_confidence=None,

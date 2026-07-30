@@ -13,7 +13,7 @@ The scoring these passes rely on is tested in test_match_scoring.py.
 from __future__ import annotations
 
 import csv
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -225,6 +225,67 @@ class TestBuildNameVariants:
     def test_none_fields_handled(self):
         variants = build_name_variants("Test Player", firstname=None, lastname=None)
         assert variants == ["test player"]
+
+
+# ─────────────────────────────────────────────────────────────
+# Test: birth_date RAW→CLEAN conversion
+# ─────────────────────────────────────────────────────────────
+
+
+class TestBirthDateConversion:
+    """API-Football sends birth dates as ISO strings; CLEAN stores them as dates."""
+
+    def test_resolved_player_birth_date_is_a_date(self):
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        api_player = _make_api_player(1100, "Pedri", birth_date="2002-11-25")
+        api_stats = _make_api_stats(1100, 529, "Barcelona")
+        understat_player = _make_understat_player(8872, "Pedri", "Barcelona")
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+        )
+
+        resolved = [p for p in result.resolved_players if p.api_football_id == 1100]
+        assert len(resolved) == 1
+        assert resolved[0].birth_date == date(2002, 11, 25)
+        assert isinstance(resolved[0].birth_date, date)
+
+    def test_missing_birth_date_stays_none(self):
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        api_player = _make_api_player(1100, "Pedri", birth_date=None)
+        api_stats = _make_api_stats(1100, 529, "Barcelona")
+        understat_player = _make_understat_player(8872, "Pedri", "Barcelona")
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+        )
+
+        resolved = [p for p in result.resolved_players if p.api_football_id == 1100]
+        assert resolved[0].birth_date is None
+
+    def test_unresolved_single_source_player_also_gets_a_date(self):
+        """The unresolved-API-Football branch builds ResolvedPlayer separately."""
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        api_player = _make_api_player(999, "Nobody Here", birth_date="1995-06-30")
+        api_stats = _make_api_stats(999, 529, "Barcelona")
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[],
+            resolved_teams=[team],
+        )
+
+        resolved = [p for p in result.resolved_players if p.api_football_id == 999]
+        assert len(resolved) == 1
+        assert resolved[0].resolution_method == "unresolved"
+        assert resolved[0].birth_date == date(1995, 6, 30)
 
 
 # ─────────────────────────────────────────────────────────────
