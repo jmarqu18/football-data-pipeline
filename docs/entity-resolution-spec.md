@@ -110,29 +110,34 @@ def build_name_variants(name: str, firstname: str | None, lastname: str | None) 
 
 ### Función de scoring con length guard
 
+El scoring de candidatos vive en `src/pipeline/match_scoring.py`, detrás de la clase `MatchScorer`. Las 4 pasadas no calculan similitud por su cuenta: construyen un `MatchScorer` al inicio de `resolve_players` y le preguntan. Los umbrales viven en `ScoringThresholds` (inyectable, con los valores de producción por defecto).
+
+`entity_resolution.py` prepara el texto (`normalize_name`, `build_name_variants`); `MatchScorer` compara texto ya preparado.
+
 ```python
-_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
+class MatchScorer:
+    def fuzzy_score(self, understat_name: str, api_variants: list[str]) -> float:
+        """Max score entre token_sort_ratio y partial_ratio sobre todas las variantes.
 
-def best_match_score(understat_name: str, api_variants: list[str]) -> float:
-    """Max score entre token_sort_ratio y partial_ratio sobre todas las variantes.
+        `understat_name` llega ya normalizado por `entity_resolution.normalize_name`.
 
-    partial_ratio solo se aplica cuando la cadena más corta es al menos el 60%
-    de la longitud de la más larga. Esto evita inflación de scores cuando una
-    variante corta (p.ej. "rodriguez") es substring del nombre completo
-    ("Ricardo Rodriguez" → 1.0 sin el guard).
-    """
-    norm = normalize_name(understat_name)
-    best = 0.0
-    for variant in api_variants:
-        score_token = fuzz.token_sort_ratio(norm, variant)
-        shorter = min(len(norm), len(variant))
-        longer = max(len(norm), len(variant))
-        if longer > 0 and (shorter / longer) >= _PARTIAL_RATIO_MIN_LENGTH_RATIO:
-            score_partial = fuzz.partial_ratio(norm, variant)
-        else:
-            score_partial = 0.0
-        best = max(best, score_token, score_partial)
-    return best / 100.0
+        partial_ratio solo se aplica cuando la cadena más corta es al menos el 60%
+        de la longitud de la más larga. Esto evita inflación de scores cuando una
+        variante corta (p.ej. "rodriguez") es substring del nombre completo
+        ("ricardo rodriguez" → 1.0 sin el guard).
+        """
+        min_length_ratio = self.thresholds.partial_ratio_min_length_ratio
+        best = 0.0
+        for variant in api_variants:
+            score_token = fuzz.token_sort_ratio(understat_name, variant)
+            shorter = min(len(understat_name), len(variant))
+            longer = max(len(understat_name), len(variant))
+            if longer > 0 and (shorter / longer) >= min_length_ratio:
+                score_partial = fuzz.partial_ratio(understat_name, variant)
+            else:
+                score_partial = 0.0
+            best = max(best, score_token, score_partial)
+        return best / 100.0
 ```
 
 **Justificación del length guard:** Sin él, `partial_ratio` daba 1.0 a variantes cortas como `"rodriguez"` porque son substring exacto del nombre normalizado `"ricardo rodriguez"`. Esto creaba conflictos falsos en Pass 2 (múltiples candidatos con score ≥ 0.85) que bloqueaban matches correctos. El umbral de 0.6 mantiene `partial_ratio` para apodos de longitud similar ("pedri" vs "pedro") pero descarta inflaciones de variantes cortas de un solo token.
@@ -155,10 +160,21 @@ Las posiciones de ambas fuentes se mapean a 4 cubos canónicos: `G`, `D`, `M`, `
 **API-Football** usa strings completos: `"Goalkeeper"`, `"Defender"`, `"Midfielder"`, `"Attacker"`, `"Forward"`.
 
 ```python
-def positions_compatible(understat_pos: str | None, api_pos: str | None) -> bool:
-    """True si comparten al menos un cubo canónico.
-    Si alguna posición es None o desconocida → True (sin penalización).
-    """
+class MatchScorer:
+    def positions_compatible(self, understat_pos: str | None, api_pos: str | None) -> bool:
+        """True si comparten al menos un cubo canónico.
+        Si alguna posición es None o desconocida → True (sin penalización).
+        """
+
+    def position_of(self, api_id: int) -> str | None:
+        """Posición API-Football del jugador, desde el índice de season stats."""
+
+    def filter_by_position(self, candidate_ids, understat_position) -> list[int]:
+        """Deja solo los candidatos con posición compatible.
+
+        Usado por Pass 2 (desempate de conflictos) y Pass 4 (veto de match
+        estadístico), de modo que la regla de compatibilidad vive en un solo sitio.
+        """
 ```
 
 Un jugador con Understat `"M S"` (cubos: `{M, F}`) y API-Football `"Midfielder"` (cubo: `{M}`) → compatible (intersección no vacía).
@@ -173,14 +189,14 @@ Un jugador con Understat `"M S"` (cubos: `{M, F}`) y API-Football `"Midfielder"`
 
 ### Pass 2 — Fuzzy name + same team → confidence 0.90 (0.88 con tiebreak)
 
-- `best_match_score ≥ 0.85` dentro del mismo equipo resuelto.
+- `scorer.fuzzy_score ≥ 0.85` dentro del mismo equipo resuelto.
 - Cubre: "Vinícius Júnior" ↔ "Vinicius Junior" (acentos), "Pedri" ↔ "Pedro" (firstname variant), "Rodrygo" ↔ "Rodrygo Goes".
 
 **Resolución de conflictos por posición:**
 
-Si los dos mejores candidatos tienen scores con diferencia < `_CONFLICT_THRESHOLD` (0.05), se intenta desempatar por compatibilidad de posición:
+Si los dos mejores candidatos tienen scores con diferencia < `thresholds.conflict` (0.05), se intenta desempatar por compatibilidad de posición:
 
-1. Filtrar candidatos en conflicto cuya posición sea compatible con la posición Understat del jugador.
+1. `scorer.filter_by_position(...)` deja los candidatos en conflicto cuya posición sea compatible con la posición Understat del jugador.
 2. Si exactamente 1 candidato compatible → resolver con **confidence 0.88**, method `'fuzzy'`.
 3. Si 0 o >1 candidatos compatibles → player queda unresolved.
 
@@ -189,7 +205,7 @@ Esta lógica solo se activa cuando `u_player.position` no es None.
 ### Pass 3 — Cross-team fuzzy + transfer history → confidence 0.70
 
 - Para jugadores sin match en passes 1-2 (posible transfer mid-season).
-- `best_match_score ≥ 0.75` contra TODOS los jugadores API-Football no resueltos.
+- `scorer.fuzzy_score ≥ 0.75` contra TODOS los jugadores API-Football no resueltos.
 - **Confirmación obligatoria:** verificar en datos RAW de transfers que el jugador estuvo en el equipo que reporta Understat durante la temporada. Se usa la capa RAW directamente (no CLEAN) para evitar dependencia circular.
 - Sin confirmación de transfer → no resolver, va a unresolved.
 
@@ -199,11 +215,11 @@ Esta lógica solo se activa cuando `u_player.position` no es None.
 
 - Solo aplica a jugadores **unresolved tras passes 1-3** que pertenecen al **mismo equipo resuelto**.
 - **Condiciones (TODAS requeridas):**
-  - `best_match_score ≥ _PASS4_NAME_FLOOR` (0.50) — filtro mínimo de nombre para evitar matches puramente estadísticos sin ninguna similitud
+  - `scorer.fuzzy_score ≥ thresholds.pass4_name_floor` (0.50) — filtro mínimo de nombre para evitar matches puramente estadísticos sin ninguna similitud
   - Diferencia de partidos (games/appearances) ≤ 3
   - Diferencia de minutos ≤ 20%
   - **Candidato único:** si >1 jugador API-Football cumple las condiciones estadísticas → no resolver (conflicto)
-  - **Posición compatible:** `positions_compatible(u_player.position, api_pos)` debe ser True — si las posiciones son incompatibles el match se rechaza aunque las stats coincidan
+  - **Posición compatible:** `scorer.filter_by_position([api_id], u_player.position)` debe devolver el candidato — si las posiciones son incompatibles el match se rechaza aunque las stats coincidan
 - Method: `'statistical'`
 
 **Datos usados:**
@@ -323,16 +339,23 @@ Criterio: **≥14 de 16 matcheables resueltos correctamente (≥87.5%)**.
 
 ## Constantes de configuración
 
-| Constante                         | Valor | Uso                                                         |
-|-----------------------------------|-------|-------------------------------------------------------------|
-| `_TEAM_FUZZY_THRESHOLD`           | 80    | token_sort_ratio mínimo para match fuzzy de equipo          |
-| `_PLAYER_FUZZY_THRESHOLD`         | 0.85  | score mínimo para Pass 2                                    |
-| `_PLAYER_CROSS_TEAM_THRESHOLD`    | 0.75  | score mínimo para Pass 3                                    |
-| `_CONFLICT_THRESHOLD`             | 0.05  | diferencia máxima entre top-2 scores para declarar conflicto |
-| `_STAT_GAMES_TOLERANCE`           | 3     | diferencia máxima de appearances en Pass 4                  |
-| `_STAT_MINUTES_TOLERANCE_PCT`     | 0.20  | diferencia máxima relativa de minutos en Pass 4             |
-| `_PASS4_NAME_FLOOR`               | 0.50  | score mínimo de nombre para entrar en Pass 4                |
-| `_PARTIAL_RATIO_MIN_LENGTH_RATIO` | 0.6   | ratio mínimo de longitud para aplicar partial_ratio         |
+Los umbrales de scoring de jugadores viven en `ScoringThresholds` (`src/pipeline/match_scoring.py`). Son campos de un modelo Pydantic frozen con estos valores por defecto, inyectables vía `MatchScorer(..., thresholds=...)` para probar comportamiento en el límite sin tocar internals:
+
+| Campo de `ScoringThresholds`      | Valor | Uso                                                          |
+|-----------------------------------|-------|--------------------------------------------------------------|
+| `player_fuzzy`                    | 0.85  | score mínimo para Pass 2                                     |
+| `cross_team_fuzzy`                | 0.75  | score mínimo para Pass 3                                     |
+| `conflict`                        | 0.05  | diferencia máxima entre top-2 scores para declarar conflicto |
+| `stat_games_tolerance`            | 3     | diferencia máxima de appearances en Pass 4                   |
+| `stat_minutes_tolerance_pct`      | 0.20  | diferencia máxima relativa de minutos en Pass 4              |
+| `pass4_name_floor`                | 0.50  | score mínimo de nombre para entrar en Pass 4                 |
+| `partial_ratio_min_length_ratio`  | 0.6   | ratio mínimo de longitud para aplicar partial_ratio          |
+
+La resolución de equipos no usa `MatchScorer` y mantiene su propia constante en `entity_resolution.py`:
+
+| Constante                         | Valor | Uso                                                          |
+|-----------------------------------|-------|--------------------------------------------------------------|
+| `_TEAM_FUZZY_THRESHOLD`           | 80    | token_sort_ratio mínimo para match fuzzy de equipo           |
 
 ---
 
