@@ -3,10 +3,11 @@
 Covers:
 - Name normalization utilities
 - Name variant generation
-- Fuzzy scoring
 - Team resolution (exact + fuzzy)
 - Player resolution with 20 known La Liga 2024/25 players
 - Unresolved candidates report generation
+
+The scoring these passes rely on is tested in test_match_scoring.py.
 """
 
 from __future__ import annotations
@@ -18,17 +19,14 @@ import pytest
 
 from pipeline.entity_resolution import (
     _get_top_candidates,
-    _parse_api_position,
-    _parse_understat_position,
-    best_match_score,
     build_name_variants,
     decode_api_name,
     normalize_name,
-    positions_compatible,
     resolve_players,
     resolve_teams,
     write_unresolved_report,
 )
+from pipeline.match_scoring import MatchScorer
 from pipeline.models.clean import ResolvedTeam
 from pipeline.models.raw import (
     RawAPIFootballPlayer,
@@ -227,119 +225,6 @@ class TestBuildNameVariants:
     def test_none_fields_handled(self):
         variants = build_name_variants("Test Player", firstname=None, lastname=None)
         assert variants == ["test player"]
-
-
-# ─────────────────────────────────────────────────────────────
-# Test: best_match_score
-# ─────────────────────────────────────────────────────────────
-
-
-class TestBestMatchScore:
-    def test_exact_match(self):
-        score = best_match_score("Jude Bellingham", ["jude bellingham"])
-        assert score == 1.0
-
-    def test_partial_ratio_catches_nickname(self):
-        # "Pedri" vs "Pedro" — partial_ratio should give a high score
-        score = best_match_score("Pedri", ["pedro gonzalez lopez", "pedro", "gonzalez lopez"])
-        assert score >= 0.80
-
-    def test_accent_stripping_gives_high_score(self):
-        score = best_match_score("Vinicius Junior", ["vinicius junior"])
-        assert score == 1.0
-
-    def test_empty_inputs(self):
-        assert best_match_score("", ["test"]) == 0.0
-        assert best_match_score("test", []) == 0.0
-
-
-# ─────────────────────────────────────────────────────────────
-# Test: best_match_score length guard
-# ─────────────────────────────────────────────────────────────
-
-
-class TestBestMatchScoreLengthGuard:
-    """partial_ratio must not inflate scores when variant is much shorter than target."""
-
-    def test_short_lastname_variant_not_inflated(self):
-        """'rodriguez' (lastname variant) must NOT score 1.0 against 'Ricardo Rodríguez'."""
-        score = best_match_score("Ricardo Rodríguez", ["rodriguez"])
-        # Without guard: partial_ratio gives 1.0 (substring match)
-        # With guard: token_sort_ratio gives ~0.69
-        assert score < 0.85, f"Short variant 'rodriguez' should not inflate to {score:.3f}"
-
-    def test_short_firstname_variant_not_inflated(self):
-        """'david' (firstname variant) must NOT score 1.0 against 'David Alaba'."""
-        score = best_match_score("David Alaba", ["david"])
-        assert score < 0.85, f"Short variant 'david' should not inflate to {score:.3f}"
-
-    def test_similar_length_variant_still_uses_partial_ratio(self):
-        """Variants of similar length should still benefit from partial_ratio."""
-        score = best_match_score("Ricardo Rodríguez", ["r. rodriguez"])
-        assert score >= 0.85, f"Similar-length variant should still score high, got {score:.3f}"
-
-    def test_nickname_matching_preserved(self):
-        """Short nicknames that are genuine matches should still work via token_sort_ratio."""
-        score = best_match_score("Pedri", ["pedro gonzalez lopez", "pedro", "gonzalez lopez"])
-        assert score >= 0.80, f"Nickname matching should be preserved, got {score:.3f}"
-
-
-# ─────────────────────────────────────────────────────────────
-# Test: Pass 2 false-conflict regression
-# ─────────────────────────────────────────────────────────────
-
-
-class TestPassTwoFalseConflictRegression:
-    """Regression: Pass 2 must not create false conflicts from partial_ratio inflation.
-
-    Before the length guard fix, short name variants (single firstname/lastname)
-    scored 1.0 via partial_ratio substring matching, causing two distinct API-Football
-    players to both tie at 1.0 against the same Understat player.
-    """
-
-    def test_ricardo_rodriguez_resolves_without_false_conflict(self):
-        """Ricardo Rodríguez (Betis) must resolve to his correct API-Football match.
-
-        Regression: 'rodriguez' variant of a different player used to score 1.0 via
-        partial_ratio, tying with the real match and blocking resolution.
-        """
-        # Real Betis player (correct match)
-        real_variants = build_name_variants("Ricardo Rodríguez")
-        # A different player who happens to have "Rodriguez" in his name
-        impostor_variants = build_name_variants("José Rodríguez")
-
-        understat_name = "Ricardo Rodriguez"
-
-        real_score = best_match_score(understat_name, real_variants)
-        impostor_score = best_match_score(understat_name, impostor_variants)
-
-        # The real match must score strictly higher than the impostor
-        assert real_score > impostor_score, (
-            f"Real match (Ricardo Rodríguez: {real_score:.3f}) must outscore "
-            f"impostor (José Rodríguez: {impostor_score:.3f})"
-        )
-        # And the real match must meet the fuzzy threshold
-        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
-
-    def test_david_alaba_resolves_without_false_conflict(self):
-        """David Alaba (Real Madrid) must resolve to his correct API-Football match.
-
-        Regression: 'david' variant used to score 1.0 via partial_ratio when the
-        Understat name was 'David Alaba'.
-        """
-        real_variants = build_name_variants("David Alaba")
-        impostor_variants = build_name_variants("David García")
-
-        understat_name = "David Alaba"
-
-        real_score = best_match_score(understat_name, real_variants)
-        impostor_score = best_match_score(understat_name, impostor_variants)
-
-        assert real_score > impostor_score, (
-            f"Real match (David Alaba: {real_score:.3f}) must outscore "
-            f"impostor (David García: {impostor_score:.3f})"
-        )
-        assert real_score >= 0.85, f"Real match should meet fuzzy threshold, got {real_score:.3f}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -838,57 +723,44 @@ class TestPassTwoPositionTiebreaker:
     def test_position_breaks_tie_single_compatible_candidate(self):
         """When two candidates tie and only one is position-compatible, it wins."""
         api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position="M",          # Understat: Midfielder
-            api_position_a="Midfielder",   # API player 801 — compatible
-            api_position_b="Goalkeeper",   # API player 802 — incompatible
+            u_position="M",  # Understat: Midfielder
+            api_position_a="Midfielder",  # API player 801 — compatible
+            api_position_b="Goalkeeper",  # API player 802 — incompatible
         )
         result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
 
-        matched = [
-            p for p in result.resolved_players
-            if p.understat_id == 9001 and p.api_football_id is not None
-        ]
+        matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
         assert len(matched) == 1, "Expected exactly one resolution via position tiebreak"
         winner = matched[0]
-        assert winner.api_football_id == 801, (
-            f"Expected api_football_id=801 (Midfielder), got {winner.api_football_id}"
-        )
+        assert winner.api_football_id == 801, f"Expected api_football_id=801 (Midfielder), got {winner.api_football_id}"
         assert winner.resolution_method == "fuzzy"
         assert winner.resolution_confidence == 0.88
 
     def test_both_compatible_stays_unresolved(self):
         """When both tied candidates are position-compatible, resolution stays ambiguous."""
         api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position="M",          # Understat: Midfielder
-            api_position_a="Midfielder",   # compatible
-            api_position_b="Midfielder",   # also compatible — still a tie
+            u_position="M",  # Understat: Midfielder
+            api_position_a="Midfielder",  # compatible
+            api_position_b="Midfielder",  # also compatible — still a tie
         )
         result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
 
-        cross_matched = [
-            p for p in result.resolved_players
-            if p.understat_id == 9001 and p.api_football_id is not None
-        ]
-        assert len(cross_matched) == 0, (
-            "Both candidates are position-compatible — conflict should not be resolved"
-        )
+        cross_matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
+        assert len(cross_matched) == 0, "Both candidates are position-compatible — conflict should not be resolved"
         unresolved_ids = {u.player_id for u in result.unresolved}
         assert 9001 in unresolved_ids, "Understat player should appear in unresolved list"
 
     def test_none_position_no_filtering(self):
         """When Understat player has no position, position tiebreak is skipped entirely."""
         api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position=None,          # unknown position → no filtering
+            u_position=None,  # unknown position → no filtering
             api_position_a="Midfielder",
             api_position_b="Goalkeeper",
         )
         result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
 
         # With no position info, the conflict is unresolvable — player stays unresolved.
-        cross_matched = [
-            p for p in result.resolved_players
-            if p.understat_id == 9001 and p.api_football_id is not None
-        ]
+        cross_matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
         assert len(cross_matched) == 0, (
             "No position on Understat player — tiebreak must not fire; player should be unresolved"
         )
@@ -910,7 +782,7 @@ def test_pass4_rejects_statistically_similar_but_unrelated_name() -> None:
       24 games / 2050 min for Atletico.
     - Stats are within tolerance (±3 games, ±20% minutes).
     - Without a name floor, Pass 4 incorrectly links them.
-    - With _PASS4_NAME_FLOOR = 0.35, the match must be rejected.
+    - With the scorer's pass4_name_floor, the match must be rejected.
     """
     team = _make_resolved_team(api_id=530, api_name="Atletico Madrid", understat_name="Atletico Madrid")
 
@@ -935,36 +807,6 @@ def test_pass4_rejects_statistically_similar_but_unrelated_name() -> None:
     gimenez_in_resolved = [p for p in result.resolved_players if p.api_football_id == 31]
     assert len(gimenez_in_resolved) == 1
     assert gimenez_in_resolved[0].understat_id is None
-
-
-def test_pass4_floor_allows_plausible_and_blocks_unrelated() -> None:
-    """Verify _PASS4_NAME_FLOOR threshold allows plausible names and blocks unrelated ones.
-
-    Tests the threshold value directly via best_match_score, since any
-    realistic name pair with a shared surname resolves in Pass 1 or 2
-    before reaching Pass 4 (making end-to-end regression testing vacuous).
-
-    Plausible pair: 'Gimenez' (Understat) vs 'J. Gimenez' (API-Football).
-    These share the same underlying identity and score above the floor.
-
-    Unrelated pair: 'Connor Gallagher' vs 'J. Gimenez' (the false positive
-    this fix is designed to prevent). Score is well below the floor.
-    """
-    from pipeline.entity_resolution import _PASS4_NAME_FLOOR
-
-    gimenez_variants = build_name_variants("J. Gimenez", "Jose Maria", "Gimenez de Vargas")
-
-    # Plausible: same player, just abbreviated name → must be above floor
-    plausible_score = best_match_score("Gimenez", gimenez_variants)
-    assert plausible_score >= _PASS4_NAME_FLOOR, (
-        f"'Gimenez' should pass the name floor against 'J. Gimenez' variants, got {plausible_score:.3f}"
-    )
-
-    # Unrelated: completely different player → must be below floor
-    gallagher_score = best_match_score("Connor Gallagher", gimenez_variants)
-    assert gallagher_score < _PASS4_NAME_FLOOR, (
-        f"'Connor Gallagher' should be blocked by name floor, got {gallagher_score:.3f}"
-    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1000,6 +842,7 @@ def test_get_top_candidates_same_team_ranked_first() -> None:
     }
 
     candidates = _get_top_candidates(
+        MatchScorer({}),
         understat_name="Arnaut Danjuma Groeneveld",
         api_players=remaining_api,
         preferred_team_id=girona_id,
@@ -1021,6 +864,7 @@ def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
     }
 
     candidates = _get_top_candidates(
+        MatchScorer({}),
         understat_name="Arnau Coromina",
         api_players=remaining_api,
         preferred_team_id=None,
@@ -1030,55 +874,6 @@ def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].candidate_source_id == 490984
-
-
-class TestPositionMapping:
-    """Position parsing and compatibility checks."""
-
-    def test_understat_midfielder_striker(self):
-        assert _parse_understat_position("M S") == {"M", "F"}
-
-    def test_understat_defender_midfielder(self):
-        assert _parse_understat_position("D M S") == {"D", "M", "F"}
-
-    def test_understat_goalkeeper(self):
-        assert _parse_understat_position("G") == {"G"}
-
-    def test_understat_none_returns_empty(self):
-        assert _parse_understat_position(None) == set()
-
-    def test_understat_unknown_code_ignored(self):
-        assert _parse_understat_position("X Y G") == {"G"}
-
-    def test_api_midfielder(self):
-        assert _parse_api_position("Midfielder") == {"M"}
-
-    def test_api_goalkeeper(self):
-        assert _parse_api_position("Goalkeeper") == {"G"}
-
-    def test_api_none_returns_empty(self):
-        assert _parse_api_position(None) == set()
-
-    def test_api_unknown_returns_empty(self):
-        assert _parse_api_position("Unknown") == set()
-
-    def test_compatible_midfielder_vs_ms(self):
-        assert positions_compatible("M S", "Midfielder") is True
-
-    def test_compatible_striker_vs_attacker(self):
-        assert positions_compatible("F S", "Attacker") is True
-
-    def test_incompatible_goalkeeper_vs_midfielder(self):
-        assert positions_compatible("G", "Midfielder") is False
-
-    def test_incompatible_defender_vs_attacker(self):
-        assert positions_compatible("D", "Attacker") is False
-
-    def test_none_understat_always_compatible(self):
-        assert positions_compatible(None, "Defender") is True
-
-    def test_none_api_always_compatible(self):
-        assert positions_compatible("D", None) is True
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1113,7 +908,7 @@ class TestPassFourPositionFilter:
 
         Uses Understat name "Balde" vs API-Football "Alejandro Balde Moreno"
         (firstname="Alejandro", lastname="Balde Moreno").  The short Understat
-        name scores ~0.59 against the variants — above _PASS4_NAME_FLOOR (0.50)
+        name scores ~0.59 against the variants — above pass4_name_floor (0.50)
         but below the Pass 2 fuzzy threshold (0.85) — so the player can only
         be matched in Pass 4.  Incompatible positions ("Goalkeeper" vs "F")
         must then block the match.
@@ -1222,8 +1017,7 @@ class TestPassFourPositionFilter:
 
         # Must be resolved via statistical matching
         statistical = [
-            p for p in result.resolved_players
-            if p.resolution_method == "statistical" and p.api_football_id == 701
+            p for p in result.resolved_players if p.resolution_method == "statistical" and p.api_football_id == 701
         ]
         assert len(statistical) == 1
         assert statistical[0].understat_id == 7001

@@ -19,6 +19,7 @@ from pathlib import Path
 from rapidfuzz import fuzz
 from unidecode import unidecode
 
+from pipeline.match_scoring import MatchScorer
 from pipeline.models.clean import (
     CandidateMatch,
     ResolutionMethod,
@@ -107,119 +108,6 @@ def build_name_variants(
         if combined:
             variants.add(combined)
     return list(variants)
-
-
-_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6  # skip partial_ratio when variant/target < this
-
-# ─────────────────────────────────────────────────────────────
-# Position mapping utilities
-# ─────────────────────────────────────────────────────────────
-
-# Understat position strings contain space-separated role codes: "M S", "D M S", etc.
-# Map each code to a canonical bucket.
-_UNDERSTAT_POSITION_MAP: dict[str, str] = {
-    "G": "G",   # Goalkeeper
-    "D": "D",   # Defender
-    "M": "M",   # Midfielder
-    "F": "F",   # Forward/Attacker
-    "S": "F",   # Striker → Forward bucket
-    "A": "F",   # Attacker → Forward bucket
-}
-
-# API-Football position strings → canonical bucket
-_API_POSITION_MAP: dict[str, str] = {
-    "Goalkeeper": "G",
-    "Defender": "D",
-    "Midfielder": "M",
-    "Attacker": "F",
-    "Forward": "F",
-}
-
-
-def _parse_understat_position(position: str | None) -> set[str]:
-    """Parse an Understat composite position string into canonical buckets.
-
-    Understat positions are space-separated codes, e.g. "M S", "D M S".
-    Returns an empty set if position is None or unrecognized.
-
-    Args:
-        position: Understat position string like "M S" or None.
-
-    Returns:
-        Set of canonical position codes (subset of {"G", "D", "M", "F"}).
-    """
-    if not position:
-        return set()
-    return {
-        _UNDERSTAT_POSITION_MAP[code]
-        for code in position.upper().split()
-        if code in _UNDERSTAT_POSITION_MAP
-    }
-
-
-def _parse_api_position(position: str | None) -> set[str]:
-    """Parse an API-Football position string into canonical buckets.
-
-    Args:
-        position: API-Football position string like "Midfielder" or None.
-
-    Returns:
-        Set with one canonical code, or empty set if unrecognized/None.
-    """
-    if not position:
-        return set()
-    canonical = _API_POSITION_MAP.get(position)
-    return {canonical} if canonical else set()
-
-
-def positions_compatible(
-    understat_pos: str | None,
-    api_pos: str | None,
-) -> bool:
-    """Return True if two position strings are compatible (share at least one bucket).
-
-    If either position is unknown/None, returns True (no information = no penalty).
-
-    Args:
-        understat_pos: Understat position string (e.g. "M S").
-        api_pos: API-Football position string (e.g. "Midfielder").
-
-    Returns:
-        True if compatible or if either is unknown.
-    """
-    us_buckets = _parse_understat_position(understat_pos)
-    api_buckets = _parse_api_position(api_pos)
-    if not us_buckets or not api_buckets:
-        return True  # unknown position → no penalty
-    return bool(us_buckets & api_buckets)
-
-
-def best_match_score(understat_name: str, api_variants: list[str]) -> float:
-    """Return the best fuzzy match score between an Understat name and API-Football variants.
-
-    Uses the maximum of token_sort_ratio and partial_ratio across all variants.
-    partial_ratio is only considered when the shorter string is at least 60% of
-    the longer string's length, preventing inflated scores from substring matches
-    (e.g. variant "rodriguez" scoring 1.0 against "Ricardo Rodríguez").
-
-    Returns a value in [0.0, 1.0].
-    """
-    norm = normalize_name(understat_name)
-    if not norm or not api_variants:
-        return 0.0
-    best = 0.0
-    for variant in api_variants:
-        if not variant:
-            continue
-        score_token = fuzz.token_sort_ratio(norm, variant)
-        shorter = min(len(norm), len(variant))
-        longer = max(len(norm), len(variant))
-        if longer > 0 and (shorter / longer) >= _PARTIAL_RATIO_MIN_LENGTH_RATIO:
-            score_partial = fuzz.partial_ratio(norm, variant)
-        else:
-            score_partial = 0.0
-        best = max(best, score_token, score_partial)
-    return best / 100.0
 
 
 # ─────────────────────────────────────────────────────────────
@@ -341,13 +229,6 @@ def resolve_teams(
 # Player resolution
 # ─────────────────────────────────────────────────────────────
 
-_PLAYER_FUZZY_THRESHOLD = 0.85
-_PLAYER_CROSS_TEAM_THRESHOLD = 0.75
-_CONFLICT_THRESHOLD = 0.05
-_STAT_GAMES_TOLERANCE = 3
-_STAT_MINUTES_TOLERANCE_PCT = 0.20
-_PASS4_NAME_FLOOR = 0.50  # minimum name similarity required for statistical match
-
 
 def _build_team_mapping(
     resolved_teams: list[ResolvedTeam],
@@ -358,14 +239,6 @@ def _build_team_mapping(
         if team.understat_name is not None:
             mapping[normalize_name(team.understat_name)] = team.api_football_id
     return mapping
-
-
-def _has_conflict(scores: list[float]) -> bool:
-    """Check if top two scores are too close, indicating ambiguity."""
-    if len(scores) < 2:
-        return False
-    sorted_scores = sorted(scores, reverse=True)
-    return (sorted_scores[0] - sorted_scores[1]) < _CONFLICT_THRESHOLD
 
 
 def _check_transfer_history(
@@ -396,27 +269,8 @@ def _check_transfer_history(
     return False
 
 
-def _stats_match(
-    api_appearances: int | None,
-    api_minutes: int | None,
-    understat_games: int,
-    understat_minutes: int,
-) -> bool:
-    """Check if two players have similar enough game/minute stats."""
-    if api_appearances is None or api_minutes is None:
-        return False
-    if abs(api_appearances - understat_games) > _STAT_GAMES_TOLERANCE:
-        return False
-    if understat_minutes == 0 and api_minutes == 0:
-        return True
-    max_minutes = max(api_minutes, understat_minutes)
-    if max_minutes == 0:
-        return False
-    minutes_diff = abs(api_minutes - understat_minutes) / max_minutes
-    return minutes_diff <= _STAT_MINUTES_TOLERANCE_PCT
-
-
 def _get_top_candidates(
+    scorer: MatchScorer,
     understat_name: str,
     api_players: dict[int, tuple[RawAPIFootballPlayer, list[str]]],
     preferred_team_id: int | None = None,
@@ -433,11 +287,12 @@ def _get_top_candidates(
     if preferred_team_id is not None and api_by_team is not None:
         same_team_ids = api_by_team.get(preferred_team_id, set())
 
+    norm_understat = normalize_name(understat_name)
     same_team: list[tuple[float, int, str]] = []
     cross_team: list[tuple[float, int, str]] = []
 
     for api_id, (api_player, variants) in api_players.items():
-        score = best_match_score(understat_name, variants)
+        score = scorer.fuzzy_score(norm_understat, variants)
         entry = (score, api_id, api_player.name)
         if api_id in same_team_ids:
             same_team.append(entry)
@@ -501,6 +356,10 @@ def resolve_players(
     for stat in api_stats:
         api_by_team.setdefault(stat.team_id, set()).add(stat.player_id)
 
+    # All candidate scoring (name similarity, position compatibility, statistical
+    # fingerprinting, ambiguity detection) goes through this one interface.
+    scorer = MatchScorer(api_stats_by_player)
+
     # Track which players have been matched
     matched_api: set[int] = set()
     matched_understat: set[int] = set()
@@ -560,21 +419,22 @@ def resolve_players(
             continue
 
         candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
+        norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id: int | None = None
         all_scores: list[float] = []
         scores_by_id: dict[int, float] = {}
         for api_id in candidates_in_team:
             variants = api_variants_map.get(api_id, [])
-            score = best_match_score(u_player.player_name, variants)
+            score = scorer.fuzzy_score(norm_u, variants)
             all_scores.append(score)
             scores_by_id[api_id] = score
             if score > best_score:
                 best_score = score
                 best_api_id = api_id
 
-        if best_api_id is not None and best_score >= _PLAYER_FUZZY_THRESHOLD:
-            if not _has_conflict(all_scores):
+        if best_api_id is not None and best_score >= scorer.thresholds.player_fuzzy:
+            if not scorer.has_conflict(all_scores):
                 api_p = api_player_map[best_api_id]
                 resolved.append(_make_resolved(api_p, u_player, 0.90, "fuzzy"))
                 matched_api.add(best_api_id)
@@ -587,25 +447,14 @@ def resolve_players(
                     u_player.team,
                 )
             elif u_player.position:
-                # Conflict: multiple candidates within _CONFLICT_THRESHOLD of the top score.
-                # Try to break the tie via position compatibility.
+                # Conflict: multiple candidates within the conflict threshold of the
+                # top score. Try to break the tie via position compatibility.
                 top_candidate_ids = [
                     api_id
                     for api_id, score in scores_by_id.items()
-                    if score >= _PLAYER_FUZZY_THRESHOLD and (best_score - score) < _CONFLICT_THRESHOLD
+                    if score >= scorer.thresholds.player_fuzzy and (best_score - score) < scorer.thresholds.conflict
                 ]
-                def _api_position(api_id: int) -> str | None:
-                    """Return the API-Football position string for a player, from stats."""
-                    for stat in api_stats_by_player.get(api_id, []):
-                        if stat.games.position:
-                            return stat.games.position
-                    return None
-
-                compatible_ids = [
-                    api_id
-                    for api_id in top_candidate_ids
-                    if positions_compatible(u_player.position, _api_position(api_id))
-                ]
+                compatible_ids = scorer.filter_by_position(top_candidate_ids, u_player.position)
                 if len(compatible_ids) == 1:
                     api_p = api_player_map[compatible_ids[0]]
                     resolved.append(_make_resolved(api_p, u_player, 0.88, "fuzzy"))
@@ -625,12 +474,13 @@ def resolve_players(
         if u_player.player_id in matched_understat:
             continue
         all_unmatched_api = set(api_player_map.keys()) - matched_api
+        norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id = None
         all_scores = []
         for api_id in all_unmatched_api:
             variants = api_variants_map.get(api_id, [])
-            score = best_match_score(u_player.player_name, variants)
+            score = scorer.fuzzy_score(norm_u, variants)
             all_scores.append(score)
             if score > best_score:
                 best_score = score
@@ -638,8 +488,8 @@ def resolve_players(
 
         if (
             best_api_id is not None
-            and best_score >= _PLAYER_CROSS_TEAM_THRESHOLD
-            and not _has_conflict(all_scores)
+            and best_score >= scorer.thresholds.cross_team_fuzzy
+            and not scorer.has_conflict(all_scores)
             and _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams)
         ):
             api_p = api_player_map[best_api_id]
@@ -662,14 +512,15 @@ def resolve_players(
             continue
 
         candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
+        norm_u = normalize_name(u_player.player_name)
         stat_matches: list[int] = []
         for api_id in candidates_in_team:
             variants = api_variants_map.get(api_id, [])
-            if best_match_score(u_player.player_name, variants) < _PASS4_NAME_FLOOR:
+            if scorer.fuzzy_score(norm_u, variants) < scorer.thresholds.pass4_name_floor:
                 continue
             stats_list = api_stats_by_player.get(api_id, [])
             for stat in stats_list:
-                if stat.team_id == u_team_id and _stats_match(
+                if stat.team_id == u_team_id and scorer.stats_match(
                     stat.games.appearances,
                     stat.games.minutes,
                     u_player.games,
@@ -682,18 +533,13 @@ def resolve_players(
             api_id = stat_matches[0]
             api_p = api_player_map[api_id]
             # Check position compatibility before accepting the statistical match.
-            api_pos: str | None = None
-            for stat in api_stats_by_player.get(api_id, []):
-                if stat.games.position:
-                    api_pos = stat.games.position
-                    break
-            if not positions_compatible(u_player.position, api_pos):
+            if not scorer.filter_by_position([api_id], u_player.position):
                 logger.debug(
                     "Pass 4 statistical rejected (position mismatch): '%s' (pos=%s) ↔ '%s' (pos=%s)",
                     u_player.player_name,
                     u_player.position,
                     api_p.name,
-                    api_pos,
+                    scorer.position_of(api_id),
                 )
             else:
                 resolved.append(_make_resolved(api_p, u_player, 0.60, "statistical"))
@@ -725,6 +571,7 @@ def resolve_players(
         if u_player.player_id not in matched_understat:
             u_team_id_for_report = team_mapping.get(normalize_name(u_player.team))
             top = _get_top_candidates(
+                scorer,
                 u_player.player_name,
                 remaining_api,
                 preferred_team_id=u_team_id_for_report,

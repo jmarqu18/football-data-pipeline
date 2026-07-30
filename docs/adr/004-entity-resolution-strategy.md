@@ -48,11 +48,11 @@ Los equipos (~20 en La Liga) se resuelven primero porque sus nombres son más es
 
 ### Normalización de nombres
 
-Se generan múltiples variantes desde los 3 campos de API-Football (`name`, `firstname`, `lastname`) y se comparan contra el nombre único de Understat. La función `best_match_score` usa `token_sort_ratio` y `partial_ratio` con un length guard (`_PARTIAL_RATIO_MIN_LENGTH_RATIO = 0.6`) para evitar que variantes cortas inflen scores por substring match.
+Se generan múltiples variantes desde los 3 campos de API-Football (`name`, `firstname`, `lastname`) y se comparan contra el nombre único de Understat. El método `MatchScorer.fuzzy_score` usa `token_sort_ratio` y `partial_ratio` con un length guard (`ScoringThresholds.partial_ratio_min_length_ratio = 0.6`) para evitar que variantes cortas inflen scores por substring match.
 
 ### Position mapping
 
-Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets canónicos API-Football (Goalkeeper, Defender, Midfielder, Attacker). La compatibilidad de posición se usa como tiebreaker en Pass 2 y como filtro en Pass 4.
+Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets canónicos API-Football (Goalkeeper, Defender, Midfielder, Attacker). La compatibilidad de posición se usa como tiebreaker en Pass 2 y como filtro en Pass 4, en ambos casos vía `MatchScorer.filter_by_position`.
 
 ## Alternatives Considered
 
@@ -100,5 +100,6 @@ Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets
 ## Referencias
 
 - Spec detallado: `docs/entity-resolution-spec.md`
-- Implementación: `src/pipeline/entity_resolution.py`
-- Tests: `tests/test_entity_resolution.py`
+- Implementación (estrategia de 4 pasadas): `src/pipeline/entity_resolution.py`
+- Implementación (scoring de candidatos): `src/pipeline/match_scoring.py`
+- Tests: `tests/test_entity_resolution.py`, `tests/test_match_scoring.py`
