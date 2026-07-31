@@ -70,3 +70,9 @@ testpaths = ["tests"]
 
 [tool.mypy]
 strict = true
+
+# No stub packages available offline for these; pyarrow and soccerdata ship
+# no py.typed marker upstream either, so per-module ignores are the only option.
+[[tool.mypy.overrides]]
+module = ["yaml", "pandas", "pandas.*", "pyarrow", "pyarrow.*", "soccerdata", "soccerdata.*"]
+ignore_missing_imports = true

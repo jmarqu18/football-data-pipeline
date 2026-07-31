@@ -6,6 +6,7 @@ import logging
 import math
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -453,11 +454,11 @@ def run_feature_engineering(
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
         for row in base.to_dict(orient="records")
     ]
-    validated: list[dict] = []
+    validated: list[dict[str, Any]] = []
     rejected = 0
     for rec in records:
         try:
-            validated.append(PlayerSeasonFeatures(**rec).model_dump())
+            validated.append(PlayerSeasonFeatures.model_validate(rec).model_dump())
         except Exception as exc:
             logger.warning("Rejected feature record player_id=%s: %s", rec.get("player_id"), exc)
             rejected += 1

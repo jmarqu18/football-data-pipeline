@@ -616,7 +616,7 @@ def run_transform_clean(
     raw_dir: Path,
     database_url: str | None = None,
     report_path: str | Path | None = None,
-) -> dict:
+) -> dict[str, int]:
     """Orchestrate the full RAW → CLEAN transformation.
 
     Args:
