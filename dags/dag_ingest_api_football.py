@@ -7,6 +7,14 @@ Tasks:
     4. ingest_transfers  — transfer records per team → Parquet.
     5. ingest_standings  — league standings (1 API call) → Parquet (independent).
 
+Configured scope:
+    Tasks 2-5 each map to an endpoint key in ``config/ingestion.yaml`` and are
+    skipped when their key is absent, so the YAML is the single source of truth
+    for what gets ingested — same contract ``ingest_all`` honours.
+    ``fetch_teams`` is not gated: ``teams`` is not an endpoint key, it costs one
+    call, and ``teams.parquet`` feeds team entity resolution downstream
+    regardless of which player endpoints are enabled.
+
 Free-tier workaround:
     The ``/players`` endpoint limits free plans to page ≤ 3 per query.
     By querying per team (``?team={id}&season=2024``), each team fits in
@@ -19,6 +27,7 @@ import logging
 import os
 from pathlib import Path
 
+from airflow.exceptions import AirflowSkipException
 from airflow.sdk import dag, task
 
 from pipeline.config import get_config
@@ -27,6 +36,18 @@ from pipeline.loaders.api_football_loader import APIFootballLoader
 logger = logging.getLogger(__name__)
 
 _RAW_DIR = Path(__file__).parents[1] / "data" / "raw" / "api_football"
+
+
+def _require_endpoint(name: str) -> None:
+    """Skip the calling task unless *name* is in the configured endpoints.
+
+    Raises AirflowSkipException rather than returning early so the run shows
+    the task as skipped instead of green — a task that ingested nothing must
+    not look like a task that ingested successfully.
+    """
+    endpoints = get_config().sources.api_football.endpoints
+    if name not in endpoints:
+        raise AirflowSkipException(f"Endpoint {name!r} not enabled in ingestion.yaml (endpoints={list(endpoints)})")
 
 
 def _loader() -> APIFootballLoader:
@@ -66,6 +87,7 @@ def ingest_api_football() -> None:
     @task
     def ingest_players_task(team_ids: list[int]) -> None:
         """Fetch players and season stats per team; save to Parquet."""
+        _require_endpoint("players_stats")
         with _loader() as loader:
             players, stats = loader.ingest_players_with_recovery(team_ids=team_ids)
 
@@ -74,9 +96,12 @@ def ingest_api_football() -> None:
         APIFootballLoader.save_parquet(stats, _RAW_DIR / "player_stats.parquet")
         logger.info("Players ingested: %d players, %d stats", len(players), len(stats))
 
-    @task
+    # none_failed: the edge from ingest_players is rate-limit sequencing, not a
+    # data dependency, so a players task skipped by config must not cascade here.
+    @task(trigger_rule="none_failed")
     def ingest_injuries_task() -> None:
         """Fetch injury records for the configured league and season."""
+        _require_endpoint("injuries")
         with _loader() as loader:
             injuries = loader.ingest_injuries()
 
@@ -84,9 +109,12 @@ def ingest_api_football() -> None:
         APIFootballLoader.save_parquet(injuries, _RAW_DIR / "injuries.parquet")
         logger.info("Injuries ingested: %d records", len(injuries))
 
-    @task
+    # none_failed: same reason as injuries. fetch_teams is never skipped, so
+    # team_ids is always available when this task actually runs.
+    @task(trigger_rule="none_failed")
     def ingest_transfers_task(team_ids: list[int]) -> None:
         """Fetch transfer records for each team."""
+        _require_endpoint("transfers")
         with _loader() as loader:
             transfers = loader.ingest_transfers(team_ids)
 
@@ -97,6 +125,7 @@ def ingest_api_football() -> None:
     @task
     def ingest_standings_task() -> int:
         """Fetch league standings from API-Football (1 API call)."""
+        _require_endpoint("standings")
         with _loader() as loader:
             standings = loader.ingest_standings()
 
@@ -111,6 +140,10 @@ def ingest_api_football() -> None:
     # Injuries has no data dependency on teams but is sequenced between
     # players and transfers to spread API calls and respect rate limits.
     # Standings runs independently (1 call).
+    #
+    # The graph is fixed; endpoints disabled in ingestion.yaml surface as
+    # skipped tasks rather than a reshaped DAG, so task history stays
+    # comparable across runs when the configured scope changes.
     team_ids = fetch_teams_task()
     players = ingest_players_task(team_ids)
     injuries = ingest_injuries_task()
