@@ -312,9 +312,10 @@ def _load_matchdays_played(raw_dir: Path | None, season_year: int) -> int | None
         return None
     standings_path = Path(raw_dir) / "api_football" / "standings.parquet"
     if not standings_path.exists():
-        # The standings endpoint is not yet active in ingestion.yaml (planned for a
-        # future sprint). Until then, this warning fires on every run and the
-        # max(starts)*90 proxy is always used — this is the expected behaviour.
+        # The standings endpoint is active, so this normally exists: the ingest
+        # DAG writes it and ingest_all covers it too. If this warning fires,
+        # ingestion did not run (or failed) — the max(starts)*90 proxy is a
+        # fallback, not the expected path.
         logger.warning(
             "Standings file not found at %s — using max(starts) proxy for minutes_pct",
             standings_path,
