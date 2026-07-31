@@ -914,6 +914,39 @@ def _players_page(total_pages: int, *items: dict) -> dict:
     }
 
 
+def _standings_response(*teams: tuple[int, str, int]) -> dict:
+    """Build a ``/standings`` payload from (team_id, name, rank) triples."""
+    return {
+        "response": [
+            {
+                "league": {
+                    "id": 140,
+                    "season": 2024,
+                    "standings": [
+                        [
+                            {
+                                "rank": rank,
+                                "team": {"id": team_id, "name": name},
+                                "points": 90 - rank,
+                                "goalsDiff": 40 - rank,
+                                "form": "WWDLW",
+                                "all": {
+                                    "played": 38,
+                                    "win": 28,
+                                    "draw": 6,
+                                    "lose": 4,
+                                    "goals": {"for": 90, "against": 30},
+                                },
+                            }
+                            for team_id, name, rank in teams
+                        ]
+                    ],
+                }
+            }
+        ]
+    }
+
+
 def _plan_error() -> dict:
     return {
         "get": "players",
@@ -1040,6 +1073,80 @@ class TestFixtureBasedRecovery:
 
         assert players == []
         assert stats == []
+
+    def test_ingest_all_covers_standings_when_configured(self, tmp_path: Path) -> None:
+        """standings is a configurable endpoint like the others, and lands in Parquet."""
+        config = _make_config(tmp_path, endpoints=("standings",))
+        client = _mock_client([_standings_response((529, "Barcelona", 1), (541, "Real Madrid", 2))])
+        loader = APIFootballLoader(config, "test-key", client=client)
+        out_dir = tmp_path / "out"
+
+        counts = loader.ingest_all(output_dir=out_dir)
+
+        assert counts["standings"] == 2
+        assert (out_dir / "standings.parquet").exists()
+
+    def test_ingest_all_skips_standings_when_not_configured(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path, endpoints=("injuries",))
+        client = _mock_client([{"response": []}])
+        loader = APIFootballLoader(config, "test-key", client=client)
+        out_dir = tmp_path / "out"
+
+        counts = loader.ingest_all(output_dir=out_dir)
+
+        assert "standings" not in counts
+        assert not (out_dir / "standings.parquet").exists()
+
+    def test_ingest_players_with_recovery_includes_recovered_players(self, tmp_path: Path) -> None:
+        """The composed method returns base + recovered players in one call."""
+        config = _make_config(tmp_path, endpoints=("players_stats",))
+        page1 = _players_page(4, _player_item(1100, "Base Player 1"))
+        page2 = _players_page(4, _player_item(1101, "Base Player 2"))
+        page3 = _players_page(4, _player_item(1102, "Base Player 3"))
+        fixtures = _load_fixture("api_football_fixtures_response.json")
+        fp1 = _load_fixture("api_football_fixtures_players_9001.json")
+        fp2 = _load_fixture("api_football_fixtures_players_9002.json")
+        client = _mock_client([page1, page2, page3, _plan_error(), fixtures, fp1, fp2])
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players_with_recovery(team_ids=[530])
+
+        assert {p.player_id for p in players} == {1100, 1101, 1102, 777}
+        assert len(stats) == 4
+
+    def test_ingest_players_with_recovery_is_plain_ingest_when_not_truncated(self, tmp_path: Path) -> None:
+        """With no truncation the composed method adds nothing and makes no extra calls."""
+        config = _make_config(tmp_path, endpoints=("players_stats",))
+        page1 = _players_page(1, _player_item(1100, "Base Player 1"))
+        client = _mock_client([page1])
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        players, stats = loader.ingest_players_with_recovery(team_ids=[530])
+
+        assert [p.player_id for p in players] == [1100]
+        assert len(stats) == 1
+        assert client.get.call_count == 1, "recovery must not issue extra requests"
+
+    def test_ingest_players_resets_truncated_state_between_calls(self, tmp_path: Path) -> None:
+        """Truncation from an earlier call must not leak into a later one."""
+        config = _make_config(tmp_path, endpoints=("players_stats",))
+        # First call: team 530 truncated by the page cap.
+        truncated_pages = [
+            _players_page(4, _player_item(1100, "Base Player 1")),
+            _players_page(4, _player_item(1101, "Base Player 2")),
+            _players_page(4, _player_item(1102, "Base Player 3")),
+            _plan_error(),
+        ]
+        # Second call: team 999 fits in one page, nothing truncated.
+        clean_page = _players_page(1, _player_item(2200, "Clean Player"))
+        client = _mock_client([*truncated_pages, clean_page])
+        loader = APIFootballLoader(config, "test-key", client=client)
+
+        loader.ingest_players(team_ids=[530])
+        assert loader._truncated_team_ids == {530}
+
+        loader.ingest_players(team_ids=[999])
+        assert loader._truncated_team_ids == set(), "stale truncation leaked into the next call"
 
     def test_ingest_all_triggers_fixture_recovery(self, tmp_path: Path) -> None:
         # Only players_stats endpoint so the mock sequence stays small.

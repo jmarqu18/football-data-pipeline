@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -556,6 +557,10 @@ class APIFootballLoader:
         Returns:
             Tuple of (validated players, validated player stats).
         """
+        # Reset first: the attribute must describe this call only, otherwise a
+        # later recovery would revisit teams truncated by an earlier one.
+        self._truncated_team_ids = set()
+
         if team_ids:
             raw_items, truncated = self._fetch_players_per_team(team_ids, force_refresh=force_refresh)
             self._truncated_team_ids = truncated
@@ -956,6 +961,37 @@ class APIFootballLoader:
             )
         return players, stats
 
+    def ingest_players_with_recovery(
+        self,
+        *,
+        team_ids: list[int] | None = None,
+        force_refresh: bool = False,
+    ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
+        """Ingest players, transparently recovering any truncated by the page cap.
+
+        Composes ``ingest_players`` with ``recover_truncated_players`` so callers
+        get the complete roster without knowing about the free-tier page cap.
+        On a paid plan no team is truncated and the recovery step is a no-op.
+
+        Prefer this over calling the two steps yourself; ``ingest_players``
+        remains available when you specifically want the un-recovered result.
+
+        Args:
+            team_ids: Team IDs for per-team pagination. If omitted, falls back
+                to league-level pagination (which the page cap can truncate).
+            force_refresh: If ``True``, skip cache for all requests.
+
+        Returns:
+            Tuple of (validated players, validated player stats), recovery included.
+        """
+        players, stats = self.ingest_players(team_ids=team_ids, force_refresh=force_refresh)
+        # No guard needed: recover_truncated_players returns empty lists when
+        # nothing was truncated.
+        recovered_players, recovered_stats = self.recover_truncated_players(
+            {p.player_id for p in players}, force_refresh=force_refresh
+        )
+        return players + recovered_players, stats + recovered_stats
+
     def ingest_injuries(self, *, force_refresh: bool = False) -> list[RawAPIFootballInjury]:
         """Ingest injury records from ``/injuries``.
 
@@ -1119,10 +1155,14 @@ class APIFootballLoader:
     # ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def save_parquet(models: list[BaseModel], path: Path) -> None:
-        """Serialise a list of Pydantic models to a Parquet file.
+    def save_parquet(models: Sequence[BaseModel], path: Path) -> None:
+        """Serialise a sequence of Pydantic models to a Parquet file.
 
         Nested models are handled natively by pyarrow as struct columns.
+
+        Takes a ``Sequence`` rather than a ``list`` because ``list`` is
+        invariant: every caller passes a concrete ``list[RawAPIFootball...]``,
+        which is not a ``list[BaseModel]``.
 
         Args:
             models: Validated Pydantic model instances.
@@ -1174,16 +1214,7 @@ class APIFootballLoader:
             team_ids = self.fetch_team_ids(force_refresh=force_refresh)
 
         if "players_stats" in endpoints:
-            players, stats = self.ingest_players(team_ids=team_ids, force_refresh=force_refresh)
-            # Fallback (free tier only): if the page cap truncated some teams,
-            # recover their missing players from fixtures. On a paid plan this
-            # is a no-op because no team is truncated.
-            if self._truncated_team_ids:
-                recovered_players, recovered_stats = self.recover_truncated_players(
-                    {p.player_id for p in players}, force_refresh=force_refresh
-                )
-                players = players + recovered_players
-                stats = stats + recovered_stats
+            players, stats = self.ingest_players_with_recovery(team_ids=team_ids, force_refresh=force_refresh)
             self.save_parquet(players, out / "players.parquet")
             self.save_parquet(stats, out / "player_stats.parquet")
             counts["players"] = len(players)
@@ -1201,6 +1232,11 @@ class APIFootballLoader:
                 transfers = self.ingest_transfers(team_ids, force_refresh=force_refresh)
                 self.save_parquet(transfers, out / "transfers.parquet")
                 counts["transfers"] = len(transfers)
+
+        if "standings" in endpoints:
+            standings = self.ingest_standings(force_refresh=force_refresh)
+            self.save_parquet(standings, out / "standings.parquet")
+            counts["standings"] = len(standings)
 
         logger.info("Ingest complete: %s", counts)
         return counts

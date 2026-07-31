@@ -6,6 +6,7 @@ sources:
       - players_stats     # Per-team pagination: ~40 calls (20 teams × ~2 pages)
       - injuries          # League-level: ~1 call (no pagination)
       - transfers         # Per-team: ~20 calls (1 per team)
+      - standings         # League-level: 1 call (feeds matchdays_played in FEATURES)
     cache_dir: data/cache/api_football
     cache_ttl_hours: 720  # PROVISIONAL: 30 días para completar la recuperación sin que expiren los caches viejos. Volver a 168 tras cerrar los equipos truncados.
     rate_limit:
