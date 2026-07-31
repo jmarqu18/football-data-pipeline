@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import text
@@ -181,7 +182,7 @@ def run_export_enriched(
     features_path: Path,
     season: str,
     engine: Engine | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Export FEATURES + CLEAN data to a SQLite database for Datasette.
 
     Creates (or replaces) the SQLite file at ``output_path`` with two tables:

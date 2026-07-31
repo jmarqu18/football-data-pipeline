@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pyarrow as pa
@@ -87,9 +87,9 @@ class APIFootballPlanRestricted(APIFootballError):
 class _FixtureRecoveryAcc:
     """Accumulator for a single player during fixture-based recovery."""
 
-    player: dict
+    player: dict[str, Any]
     team_name: str
-    stats: list[dict]
+    stats: list[dict[str, Any]]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ class APIFootballLoader:
         parts = "_".join(f"{k}_{v}" for k, v in sorted(params.items()))
         return Path(self._config.cache_dir) / endpoint / f"{parts}.json"
 
-    def _read_cache(self, path: Path) -> dict | None:
+    def _read_cache(self, path: Path) -> dict[str, Any] | None:
         """Return cached JSON if the file exists and TTL has not expired."""
         if not path.exists():
             return None
@@ -166,12 +166,12 @@ class APIFootballLoader:
             logger.debug("Cache expired: %s (age=%.0fs)", path, age)
             return None
         with path.open(encoding="utf-8") as f:
-            data = json.load(f)
+            data: dict[str, Any] = json.load(f)
         self._cache_hits += 1
         logger.debug("Cache hit: %s", path)
         return data
 
-    def _write_cache(self, path: Path, data: dict) -> None:
+    def _write_cache(self, path: Path, data: dict[str, Any]) -> None:
         """Write raw API response JSON to cache."""
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
@@ -183,7 +183,7 @@ class APIFootballLoader:
         params: dict[str, str | int],
         *,
         force_refresh: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Execute a cache-first HTTP GET against API-Football.
 
         Args:
@@ -245,7 +245,7 @@ class APIFootballLoader:
         self._last_call_time = time.time()
         self._calls_made += 1
 
-        data = response.json()
+        data: dict[str, Any] = response.json()
 
         # Check API-level errors
         api_errors = data.get("errors")
@@ -316,7 +316,7 @@ class APIFootballLoader:
         params: dict[str, str | int],
         *,
         force_refresh: bool = False,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Fetch all pages for a paginated endpoint.
 
         Returns:
@@ -326,7 +326,7 @@ class APIFootballLoader:
             before any early stop).  ``total_pages`` lets callers detect
             truncation when the free-tier page cap kicks in.
         """
-        all_items: list[dict] = []
+        all_items: list[dict[str, Any]] = []
         page = 1
         total_pages = 1
 
@@ -356,7 +356,7 @@ class APIFootballLoader:
     # ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_player(raw_item: dict) -> dict:
+    def _extract_player(raw_item: dict[str, Any]) -> dict[str, Any]:
         """Flatten a ``/players`` response item into a ``RawAPIFootballPlayer`` dict."""
         p = raw_item["player"]
         birth = p.get("birth") or {}
@@ -374,7 +374,7 @@ class APIFootballLoader:
         }
 
     @staticmethod
-    def _extract_player_stats(player_id: int, stat: dict) -> dict:
+    def _extract_player_stats(player_id: int, stat: dict[str, Any]) -> dict[str, Any]:
         """Flatten one ``statistics[]`` entry into a ``RawAPIFootballPlayerStats`` dict.
 
         Fixes known API typos:
@@ -420,7 +420,7 @@ class APIFootballLoader:
         }
 
     @staticmethod
-    def _extract_injury(raw_item: dict) -> dict:
+    def _extract_injury(raw_item: dict[str, Any]) -> dict[str, Any]:
         """Flatten an ``/injuries`` response item into a ``RawAPIFootballInjury`` dict."""
         fixture = raw_item.get("fixture") or {}
         fixture_id = fixture.get("id")
@@ -442,7 +442,7 @@ class APIFootballLoader:
         }
 
     @staticmethod
-    def _extract_transfer(player_id: int, player_name: str, transfer: dict) -> dict:
+    def _extract_transfer(player_id: int, player_name: str, transfer: dict[str, Any]) -> dict[str, Any]:
         """Flatten one transfer entry into a ``RawAPIFootballTransfer`` dict."""
         teams = transfer.get("teams") or {}
         team_in = teams.get("in") or {}
@@ -459,7 +459,7 @@ class APIFootballLoader:
         }
 
     @staticmethod
-    def _extract_team(item: dict) -> RawAPIFootballTeam:
+    def _extract_team(item: dict[str, Any]) -> RawAPIFootballTeam:
         """Map one /teams response entry to RawAPIFootballTeam."""
         t = item["team"]
         v = item.get("venue") or {}
@@ -578,7 +578,7 @@ class APIFootballLoader:
         team_ids: list[int],
         *,
         force_refresh: bool = False,
-    ) -> tuple[list[dict], set[int]]:
+    ) -> tuple[list[dict[str, Any]], set[int]]:
         """Paginate ``/players`` per team to bypass the free-tier 3-page limit.
 
         Each team is queried independently (``?team={id}&season={}``).
@@ -603,7 +603,7 @@ class APIFootballLoader:
             ``truncated_team_ids`` is the set of teams whose pagination was
             cut short by the free-tier page cap.
         """
-        all_items: list[dict] = []
+        all_items: list[dict[str, Any]] = []
         truncated_team_ids: set[int] = set()
 
         for team_id in team_ids:
@@ -626,7 +626,7 @@ class APIFootballLoader:
         return all_items, truncated_team_ids
 
     def _parse_player_items(
-        self, raw_items: list[dict]
+        self, raw_items: list[dict[str, Any]]
     ) -> tuple[list[RawAPIFootballPlayer], list[RawAPIFootballPlayerStats]]:
         """Validate and extract player profiles and stats from raw API items.
 
@@ -702,14 +702,14 @@ class APIFootballLoader:
 
     @staticmethod
     def _aggregate_fixture_stats(
-        stat_list: list[dict],
+        stat_list: list[dict[str, Any]],
         *,
         player_id: int,
         team_id: int,
         team_name: str,
         league_id: int,
         season: int,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Reconstruct season-total statistics from per-fixture stat entries.
 
         ``/fixtures/players`` returns one ``statistics[]`` entry *per match*,
@@ -1093,7 +1093,7 @@ class APIFootballLoader:
         Returns:
             List of RawAPIFootballStandings, one per team.
         """
-        params = {
+        params: dict[str, str | int] = {
             "league": self._config.league_id,
             "season": self._config.season,
         }

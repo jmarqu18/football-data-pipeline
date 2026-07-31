@@ -9,7 +9,9 @@ and Parquet output.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, Protocol
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -19,6 +21,19 @@ from pipeline.config import UnderstatConfig
 from pipeline.models.raw import RawUnderstatPlayerSeason, RawUnderstatShot
 
 logger = logging.getLogger(__name__)
+
+
+class _SoccerdataUnderstatClient(Protocol):
+    """The slice of soccerdata's ``Understat`` client this loader depends on.
+
+    soccerdata ships no type stubs, so mypy sees it as ``Any``; this Protocol
+    is what makes ``self._client`` typed rather than ``object``. A test double
+    satisfies it structurally just by having these two methods — no import of
+    soccerdata required.
+    """
+
+    def read_shot_events(self) -> Any: ...
+    def read_player_season_stats(self) -> Any: ...
 
 
 class UnderstatLoader:
@@ -34,7 +49,7 @@ class UnderstatLoader:
     def __init__(
         self,
         config: UnderstatConfig,
-        client: object | None = None,
+        client: _SoccerdataUnderstatClient | None = None,
     ) -> None:
         self._config = config
         if client is not None:
@@ -74,7 +89,7 @@ class UnderstatLoader:
         return value
 
     @staticmethod
-    def _extract_shot(row: dict) -> dict:
+    def _extract_shot(row: dict[str, Any]) -> dict[str, Any]:
         """Map a soccerdata shot-event row to RawUnderstatShot fields."""
         nan = UnderstatLoader._nan_to_none
         return {
@@ -91,7 +106,7 @@ class UnderstatLoader:
         }
 
     @staticmethod
-    def _extract_player_season(row: dict) -> dict:
+    def _extract_player_season(row: dict[str, Any]) -> dict[str, Any]:
         """Map a soccerdata player-season row to RawUnderstatPlayerSeason fields."""
         return {
             "player_id": row["player_id"],
@@ -199,8 +214,12 @@ class UnderstatLoader:
     # ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def save_parquet(models: list[BaseModel], path: Path) -> None:
-        """Serialise a list of Pydantic models to a Parquet file.
+    def save_parquet(models: Sequence[BaseModel], path: Path) -> None:
+        """Serialise a sequence of Pydantic models to a Parquet file.
+
+        Takes a ``Sequence`` rather than a ``list`` because ``list`` is
+        invariant: callers pass a concrete ``list[RawUnderstat...]``, which is
+        not a ``list[BaseModel]``.
 
         Args:
             models: Validated Pydantic model instances.
