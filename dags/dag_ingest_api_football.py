@@ -29,6 +29,19 @@ logger = logging.getLogger(__name__)
 _RAW_DIR = Path(__file__).parents[1] / "data" / "raw" / "api_football"
 
 
+def _loader() -> APIFootballLoader:
+    """Build a loader from the ingestion config and the deployment environment.
+
+    Reading the API key from the environment belongs here, at the edge, rather
+    than inside the loader — the loader takes its credentials explicitly so it
+    stays constructible in tests without touching os.environ.
+    """
+    return APIFootballLoader(
+        config=get_config().sources.api_football,
+        api_key=os.environ["API_FOOTBALL_KEY"],
+    )
+
+
 @dag(
     dag_id="ingest_api_football",
     schedule=None,
@@ -42,10 +55,7 @@ def ingest_api_football() -> None:
     @task
     def fetch_teams_task() -> list[int]:
         """Discover all teams for the configured league; save metadata to Parquet."""
-        cfg = get_config().sources.api_football
-        api_key = os.environ["API_FOOTBALL_KEY"]
-
-        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
+        with _loader() as loader:
             teams = loader.fetch_teams()
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,19 +66,8 @@ def ingest_api_football() -> None:
     @task
     def ingest_players_task(team_ids: list[int]) -> None:
         """Fetch players and season stats per team; save to Parquet."""
-        cfg = get_config().sources.api_football
-        api_key = os.environ["API_FOOTBALL_KEY"]
-
-        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
-            players, stats = loader.ingest_players(team_ids=team_ids)
-            # Free-tier fallback: if /players was truncated by the page cap
-            # (paging.total > 3), recover the missing players from
-            # /fixtures/players. No-op on a paid plan, where no team is
-            # truncated and _truncated_team_ids stays empty.
-            if loader._truncated_team_ids:
-                recovered_players, recovered_stats = loader.recover_truncated_players({p.player_id for p in players})
-                players = players + recovered_players
-                stats = stats + recovered_stats
+        with _loader() as loader:
+            players, stats = loader.ingest_players_with_recovery(team_ids=team_ids)
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
         APIFootballLoader.save_parquet(players, _RAW_DIR / "players.parquet")
@@ -78,10 +77,7 @@ def ingest_api_football() -> None:
     @task
     def ingest_injuries_task() -> None:
         """Fetch injury records for the configured league and season."""
-        cfg = get_config().sources.api_football
-        api_key = os.environ["API_FOOTBALL_KEY"]
-
-        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
+        with _loader() as loader:
             injuries = loader.ingest_injuries()
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,10 +87,7 @@ def ingest_api_football() -> None:
     @task
     def ingest_transfers_task(team_ids: list[int]) -> None:
         """Fetch transfer records for each team."""
-        cfg = get_config().sources.api_football
-        api_key = os.environ["API_FOOTBALL_KEY"]
-
-        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
+        with _loader() as loader:
             transfers = loader.ingest_transfers(team_ids)
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,10 +97,7 @@ def ingest_api_football() -> None:
     @task
     def ingest_standings_task() -> int:
         """Fetch league standings from API-Football (1 API call)."""
-        cfg = get_config().sources.api_football
-        api_key = os.environ["API_FOOTBALL_KEY"]
-
-        with APIFootballLoader(config=cfg, api_key=api_key) as loader:
+        with _loader() as loader:
             standings = loader.ingest_standings()
 
         _RAW_DIR.mkdir(parents=True, exist_ok=True)
