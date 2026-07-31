@@ -23,7 +23,8 @@ _SEASON_TOTAL_MINUTES = 3420  # 38 matchdays × 90 min
 
 def _safe_divide(num: pd.Series, denom: pd.Series) -> pd.Series:
     """Divide num/denom, returning NaN where denom is 0 or NaN."""
-    return np.where(denom > 0, num / denom, np.nan).astype(float)
+    result = np.where(denom > 0, num / denom, np.nan)
+    return pd.Series(result, index=num.index, dtype=float)
 
 
 def compute_per90_features(
