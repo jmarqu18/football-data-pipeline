@@ -34,7 +34,9 @@ dev = [
 [dependency-groups]
 dev = [
     "ruff>=0.15.6",
-    "mypy>=1.13.0"
+    "mypy>=1.13.0",
+    "pandas-stubs>=3.0.5.260730",
+    "types-pyyaml>=6.0.12.20260724",
 ]
 
 [build-system]
@@ -71,8 +73,9 @@ testpaths = ["tests"]
 [tool.mypy]
 strict = true
 
-# No stub packages available offline for these; pyarrow and soccerdata ship
-# no py.typed marker upstream either, so per-module ignores are the only option.
+# pyarrow and soccerdata ship no py.typed marker and no stub package exists
+# upstream, so these stay ignored. yaml and pandas are covered by real stub
+# packages (types-PyYAML, pandas-stubs) in the dev dependency group instead.
 [[tool.mypy.overrides]]
-module = ["yaml", "pandas", "pandas.*", "pyarrow", "pyarrow.*", "soccerdata", "soccerdata.*"]
+module = ["pyarrow", "pyarrow.*", "soccerdata", "soccerdata.*"]
 ignore_missing_imports = true
