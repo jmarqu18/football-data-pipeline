@@ -13,6 +13,7 @@ The scoring these passes rely on is tested in test_match_scoring.py.
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import UTC, date, datetime
 
 import pytest
@@ -268,6 +269,71 @@ class TestBirthDateConversion:
 
         resolved = [p for p in result.resolved_players if p.api_football_id == 1100]
         assert resolved[0].birth_date is None
+
+    def test_empty_birth_date_is_treated_as_missing(self):
+        """API-Football can send an empty birth date; RAW preserves it verbatim."""
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        api_player = _make_api_player(1100, "Pedri", birth_date="")
+        api_stats = _make_api_stats(1100, 529, "Barcelona")
+        understat_player = _make_understat_player(8872, "Pedri", "Barcelona")
+
+        result = resolve_players(
+            api_players=[api_player],
+            api_stats=[api_stats],
+            understat_players=[understat_player],
+            resolved_teams=[team],
+        )
+
+        resolved = [p for p in result.resolved_players if p.api_football_id == 1100]
+        assert len(resolved) == 1
+        assert resolved[0].birth_date is None
+        assert resolved[0].understat_id == 8872, "player must still resolve normally"
+
+    def test_malformed_birth_date_is_logged_and_dropped(self, caplog):
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        api_player = _make_api_player(1100, "Pedri", birth_date="not-a-date")
+        api_stats = _make_api_stats(1100, 529, "Barcelona")
+        understat_player = _make_understat_player(8872, "Pedri", "Barcelona")
+
+        with caplog.at_level(logging.WARNING, logger="pipeline.entity_resolution"):
+            result = resolve_players(
+                api_players=[api_player],
+                api_stats=[api_stats],
+                understat_players=[understat_player],
+                resolved_teams=[team],
+            )
+
+        resolved = [p for p in result.resolved_players if p.api_football_id == 1100]
+        assert resolved[0].birth_date is None
+        assert any("not-a-date" in r.message and "1100" in r.message for r in caplog.records), (
+            f"expected a WARNING naming the bad value and the player, got {[r.message for r in caplog.records]}"
+        )
+
+    def test_one_bad_birth_date_does_not_block_other_players(self):
+        """A single malformed record must not abort resolution for everyone else."""
+        team = _make_resolved_team(api_id=529, api_name="Barcelona", understat_name="Barcelona")
+        bad = _make_api_player(1100, "Pedri", birth_date="")
+        good = _make_api_player(1101, "Lamine Yamal", birth_date="2007-07-13")
+        api_stats = [
+            _make_api_stats(1100, 529, "Barcelona"),
+            _make_api_stats(1101, 529, "Barcelona"),
+        ]
+        understat_players = [
+            _make_understat_player(8872, "Pedri", "Barcelona"),
+            _make_understat_player(8873, "Lamine Yamal", "Barcelona"),
+        ]
+
+        result = resolve_players(
+            api_players=[bad, good],
+            api_stats=api_stats,
+            understat_players=understat_players,
+            resolved_teams=[team],
+        )
+
+        by_api_id = {p.api_football_id: p for p in result.resolved_players}
+        assert by_api_id[1100].birth_date is None
+        assert by_api_id[1101].birth_date == date(2007, 7, 13)
+        assert by_api_id[1101].understat_id == 8873
 
     def test_unresolved_single_source_player_also_gets_a_date(self):
         """The unresolved-API-Football branch builds ResolvedPlayer separately."""

@@ -230,25 +230,35 @@ def resolve_teams(
 # ─────────────────────────────────────────────────────────────
 
 
-def _parse_birth_date(raw_birth_date: str | None) -> date | None:
+def _parse_birth_date(raw_birth_date: str | None, api_player_id: int) -> date | None:
     """Convert an API-Football ISO birth date string into a date.
 
     API-Football returns birth dates as ISO strings ("2002-11-25"); the CLEAN
     layer stores them as dates. Doing the conversion here keeps the RAW→CLEAN
     transformation visible instead of leaving it to Pydantic coercion.
 
+    A blank or unparseable value yields None rather than raising: one bad record
+    must not abort resolution for every other player. Unparseable values are
+    logged as WARNING so the bad data stays visible.
+
     Args:
         raw_birth_date: ISO date string from RawAPIFootballPlayer, or None.
+        api_player_id: API-Football player_id, for the warning message.
 
     Returns:
-        The parsed date, or None when the source has no birth date.
-
-    Raises:
-        ValueError: If the string is not a valid ISO date.
+        The parsed date, or None when the source value is missing or invalid.
     """
-    if raw_birth_date is None:
+    if raw_birth_date is None or not raw_birth_date.strip():
         return None
-    return date.fromisoformat(raw_birth_date)
+    try:
+        return date.fromisoformat(raw_birth_date)
+    except ValueError:
+        logger.warning(
+            "Invalid birth_date %r for API-Football player %d, storing NULL",
+            raw_birth_date,
+            api_player_id,
+        )
+        return None
 
 
 def _build_team_mapping(
@@ -398,7 +408,7 @@ def resolve_players(
             known_name=u_p.player_name if u_p.player_name != decoded_name else None,
             api_football_id=api_p.player_id,
             understat_id=u_p.player_id,
-            birth_date=_parse_birth_date(api_p.birth_date),
+            birth_date=_parse_birth_date(api_p.birth_date, api_p.player_id),
             nationality=api_p.nationality,
             photo_url=api_p.photo_url,
             resolution_confidence=confidence,
@@ -625,7 +635,7 @@ def resolve_players(
                 known_name=None,
                 api_football_id=api_p.player_id,
                 understat_id=None,
-                birth_date=_parse_birth_date(api_p.birth_date),
+                birth_date=_parse_birth_date(api_p.birth_date, api_p.player_id),
                 nationality=api_p.nationality,
                 photo_url=api_p.photo_url,
                 resolution_confidence=None,
