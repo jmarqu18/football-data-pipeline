@@ -1,0 +1,17 @@
+# Normalize line endings to LF for all text files, regardless of the
+# contributor's OS or git config (see CLAUDE.md note on git-bash/Windows).
+* text=auto eol=lf
+
+*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sql text eol=lf
+*.toml text eol=lf
+
+# Binary-ish or generated content: leave untouched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
