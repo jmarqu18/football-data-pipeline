@@ -283,24 +283,29 @@ sources:
 
 ## Estado de implementación
 
-| Módulo                                        | Estado                                                   |
-| --------------------------------------------- | -------------------------------------------------------- |
-| `src/pipeline/config.py`                      | Completo — YAML config + Pydantic models + singleton     |
-| `src/pipeline/models/raw.py`                  | Completo — Pydantic models para API-Football y Understat |
-| `src/pipeline/loaders/api_football_loader.py` | Completo — HTTP + cache JSON + rate limit + retry        |
-| `src/pipeline/loaders/understat_loader.py`    | Completo — soccerdata wrapper + validación Pydantic      |
-| `src/pipeline/observability.py`               | Skeleton                                                 |
-| `src/pipeline/entity_resolution.py`           | Completo — 4-pass resolution (team + player) + CSV report |
-| `src/pipeline/transform_clean.py`             | Completo — Parquet read + entity resolution + PostgreSQL insert |
-| `src/pipeline/feature_engineering.py`         | Skeleton                                                 |
-| `dags/dag_ingest_api_football.py`             | Completo — TaskFlow API, 3 tasks                         |
-| `dags/dag_ingest_understat.py`                | Completo — TaskFlow API, 2 tasks                         |
-| `dags/dag_transform_clean.py`                 | Completo — RAW→CLEAN con entity resolution + PostgreSQL  |
-| `dags/dag_build_features.py`                  | Skeleton                                                 |
-| `dags/dag_enrich.py`                          | Skeleton                                                 |
-| `sql/init.sql`                                | Completo — DDL PostgreSQL 8 tablas                       |
-| `src/pipeline/models/clean.py`                | Completo — Pydantic models para entity resolution output |
-| `src/pipeline/models/features.py`             | Por implementar                                          |
+| Módulo                                          | Estado                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `src/pipeline/config.py`                        | Completo — YAML config + Pydantic models + singleton             |
+| `src/pipeline/db.py`                            | Completo — gestión de conexión PostgreSQL                        |
+| `src/pipeline/models/raw.py`                    | Completo — Pydantic models para API-Football y Understat         |
+| `src/pipeline/models/clean.py`                  | Completo — Pydantic models para entity resolution output         |
+| `src/pipeline/models/features.py`               | Completo — Pydantic models para métricas derivadas                |
+| `src/pipeline/loaders/api_football_loader.py`   | Completo — facade sobre Transport + Recovery                     |
+| `src/pipeline/loaders/api_football_transport.py`| Completo — HTTP + cache JSON + rate limit + retry                 |
+| `src/pipeline/loaders/api_football_recovery.py` | Completo — reintentos y recuperación de fallos parciales          |
+| `src/pipeline/loaders/understat_loader.py`      | Completo — soccerdata wrapper + validación Pydantic               |
+| `src/pipeline/observability.py`                 | Completo — logging namespaced + configuración idempotente fuera de Airflow |
+| `src/pipeline/entity_resolution.py`             | Completo — 4-pass resolution (team + player) + CSV report        |
+| `src/pipeline/match_scoring.py`                 | Completo — scoring de coincidencias para entity resolution        |
+| `src/pipeline/transform_clean.py`               | Completo — Parquet read + entity resolution + PostgreSQL insert  |
+| `src/pipeline/feature_engineering.py`           | Completo — per-90, xG overperformance, percentiles                |
+| `src/pipeline/export_enriched.py`               | Completo — vista plana FEATURES+CLEAN → SQLite/Datasette          |
+| `dags/dag_ingest_api_football.py`                | Completo — TaskFlow API, 3 tasks                                  |
+| `dags/dag_ingest_understat.py`                   | Completo — TaskFlow API, 2 tasks                                  |
+| `dags/dag_transform_clean.py`                    | Completo — RAW→CLEAN con entity resolution + PostgreSQL           |
+| `dags/dag_build_features.py`                     | Completo — CLEAN→FEATURES                                         |
+| `dags/dag_export_enriched.py`                    | Completo — FEATURES→ENRICHED (SQLite/Datasette)                   |
+| `sql/init.sql`                                   | Completo — DDL PostgreSQL 8 tablas                                |
 
 ## Qué NO hacer
 
