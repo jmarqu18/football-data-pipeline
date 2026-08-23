@@ -14,10 +14,13 @@ which pass wins belongs to ``pipeline.entity_resolution`` (see ADR-004).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, KeysView
 
 from pipeline.models.raw import RawAPIFootballPlayer, RawAPIFootballPlayerStats
 from pipeline.name_normalization import build_name_variants
+
+logger = logging.getLogger(__name__)
 
 
 class CandidatePool:
@@ -25,9 +28,9 @@ class CandidatePool:
 
     Built once per run, then queried by every pass. The indexes are derived
     from two different sources — identity from ``api_players``, team membership
-    and stats from ``api_stats`` — so a player may be known to one and not the
-    other. Lookups that a pass performs before scoring are lenient; lookups it
-    performs after choosing a match are not.
+    and stats from ``api_stats`` — which can disagree: a season-stats row may
+    reference a player_id with no biographical record. Such rows are dropped at
+    construction, so the pool never offers a candidate it cannot describe.
     """
 
     def __init__(
@@ -36,6 +39,10 @@ class CandidatePool:
         api_stats: Iterable[RawAPIFootballPlayerStats],
     ) -> None:
         """Build the indexes.
+
+        Season-stats rows for players absent from ``api_players`` are skipped
+        and counted in a WARNING: the pipeline keeps running on partial data,
+        but the discrepancy stays visible.
 
         Args:
             api_players: Biographical records, the source of identity and names.
@@ -50,9 +57,20 @@ class CandidatePool:
 
         self._stats: dict[int, list[RawAPIFootballPlayerStats]] = {}
         self._by_team: dict[int, set[int]] = {}
+        orphans: set[int] = set()
         for stat in api_stats:
+            if stat.player_id not in self._players:
+                orphans.add(stat.player_id)
+                continue
             self._stats.setdefault(stat.player_id, []).append(stat)
             self._by_team.setdefault(stat.team_id, set()).add(stat.player_id)
+
+        if orphans:
+            logger.warning(
+                "Skipped season stats for %d API-Football player(s) with no biographical record: %s",
+                len(orphans),
+                sorted(orphans),
+            )
 
     # ── Identity ──
 
@@ -66,8 +84,9 @@ class CandidatePool:
             The biographical record.
 
         Raises:
-            KeyError: If the id is unknown. Callers reach this only after
-                choosing a candidate the pool itself offered, so a miss is a bug.
+            KeyError: If the id is unknown. Every id the pool hands out via
+                :meth:`in_team` or :meth:`all_ids` resolves here, so a miss
+                means the caller invented an id.
         """
         return self._players[api_id]
 
@@ -78,15 +97,12 @@ class CandidatePool:
     def variants(self, api_id: int) -> list[str]:
         """Return the normalized name variants for a player.
 
-        Lenient by design: passes score every candidate before they know which
-        one wins, and an id present in the stats but absent from the player
-        list must score zero rather than raise.
-
         Args:
             api_id: API-Football player_id.
 
         Returns:
-            The variants, or an empty list if the player is unknown.
+            The variants, or an empty list if the player is unknown — an
+            unknown candidate scores zero rather than aborting a pass.
         """
         return self._variants.get(api_id, [])
 

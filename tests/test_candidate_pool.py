@@ -11,6 +11,10 @@ the pool.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import pytest
 
 from pipeline.candidate_pool import CandidatePool
@@ -40,6 +44,24 @@ _EMPTY_STATS_KWARGS = {
     "cards": _APIFootballCards(),
     "penalty": _APIFootballPenalty(),
 }
+
+
+@contextmanager
+def caplog_at_warning() -> Iterator[list[str]]:
+    """Collect WARNING messages emitted by the pool while the block runs."""
+    records: list[str] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    logger = logging.getLogger("pipeline.candidate_pool")
+    handler = _Collector(level=logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
 
 
 def _player(
@@ -187,6 +209,50 @@ class TestPositionOf:
 # ─────────────────────────────────────────────────────────────
 # Season stats, scoped to a team
 # ─────────────────────────────────────────────────────────────
+
+
+class TestStatsWithoutABiographicalRecord:
+    """A player_id can appear in api_stats and not in api_players.
+
+    Identity comes from one endpoint and team membership from another, so the
+    two lists can disagree. The pool must never offer a candidate it cannot
+    describe: passes look the winner up with player(), which raises.
+    """
+
+    def test_in_team_does_not_offer_an_unknown_player(self):
+        pool = CandidatePool(
+            [_player(player_id=1)],
+            [_stats(1, team_id=529), _stats(999, team_id=529)],
+        )
+
+        assert pool.in_team(529) == {1}
+
+    def test_every_offered_candidate_can_be_looked_up(self):
+        pool = CandidatePool(
+            [_player(player_id=1)],
+            [_stats(1, team_id=529), _stats(999, team_id=529)],
+        )
+
+        for api_id in pool.in_team(529):
+            assert pool.player(api_id) is not None
+
+    def test_the_orphan_is_logged(self):
+        with caplog_at_warning() as records:
+            CandidatePool([_player(player_id=1)], [_stats(999, team_id=529)])
+
+        assert any("999" in message for message in records), f"expected a WARNING naming id 999, got {records}"
+
+    def test_orphan_stats_are_not_indexed(self):
+        pool = CandidatePool([_player(player_id=1)], [_stats(999, team_id=529, position="Midfielder")])
+
+        assert pool.position_of(999) is None
+        assert pool.stats_for_team(999, 529) == []
+
+    def test_a_clean_pool_logs_nothing(self):
+        with caplog_at_warning() as records:
+            CandidatePool([_player(player_id=1)], [_stats(1, team_id=529)])
+
+        assert records == []
 
 
 class TestStatsForTeam:

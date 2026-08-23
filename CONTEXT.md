@@ -50,7 +50,9 @@ Pool y ledger no se conocen. Cuando una pasada quiere candidatos disponibles com
 
 Un jugador transferido a mitad de temporada tiene una fila de stats por club, así que `in_team` lo devuelve bajo los dos y `stats_for_team` acota al club preguntado — que es lo que hace comparables sus números con los de Understat, siempre por club.
 
-La identidad viene de `api_players` y la pertenencia a equipo de `api_stats`, dos listas distintas. Por eso `variants()` es indulgente y devuelve `[]` ante un id desconocido (las pasadas puntúan antes de saber quién gana), mientras que `player()` lanza `KeyError` (a esa llamada solo se llega tras elegir un candidato que el propio pool ofreció).
+La identidad viene de `api_players` y la pertenencia a equipo de `api_stats`, dos listas distintas que pueden discrepar: puede haber stats de un `player_id` sin ficha biográfica. Esas filas se descartan al construir el pool, con un WARNING que las nombra.
+
+De ahí la invariante: **el pool nunca ofrece un candidato que no sepa describir**. Todo id que sale de `in_team()` o `all_ids()` resuelve en `player()`, `variants()` y `position_of()`.
 
 ### Resolution Ledger
 
