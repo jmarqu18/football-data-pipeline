@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import csv
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,6 +35,14 @@ from pipeline.models.raw import (
 )
 from pipeline.name_normalization import decode_api_name, normalize_name
 from pipeline.resolution_ledger import ResolutionLedger
+from pipeline.resolution_passes import (
+    ContextualPass,
+    ExactPass,
+    FuzzyPass,
+    ResolutionPass,
+    ResolutionSubject,
+    StatisticalPass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,32 +177,42 @@ def _build_team_mapping(
     return mapping
 
 
-def _check_transfer_history(
-    api_player_id: int,
-    understat_team_name: str,
-    raw_transfers: list[RawAPIFootballTransfer],
-    resolved_teams: list[ResolvedTeam],
-) -> bool:
-    """Check if an API-Football player has transfer history linking them to a team."""
-    norm_u_team = normalize_name(understat_team_name)
+def _run_passes(
+    passes: Sequence[ResolutionPass],
+    subjects: Sequence[ResolutionSubject],
+    ledger: ResolutionLedger,
+) -> None:
+    """Run every subject through each pass in turn, recording what matches.
 
-    # Build set of API-Football team IDs that map to the Understat team
-    team_ids: set[int] = set()
-    for team in resolved_teams:
-        if team.understat_name and normalize_name(team.understat_name) == norm_u_team:
-            team_ids.add(team.api_football_id)
+    The ordering is pass-major and load-bearing: all subjects go through pass 1
+    before any reaches pass 2. Running player-major instead would let a
+    low-confidence match on an early subject claim a candidate that a later
+    subject would have matched exactly, which is precisely what the descending
+    confidence order exists to prevent.
 
-    for transfer in raw_transfers:
-        if transfer.player_id != api_player_id:
-            continue
-        if transfer.team_in_id in team_ids or transfer.team_out_id in team_ids:
-            return True
-        # Also check by name if IDs don't match
-        if transfer.team_in_name and normalize_name(transfer.team_in_name) == norm_u_team:
-            return True
-        if transfer.team_out_name and normalize_name(transfer.team_out_name) == norm_u_team:
-            return True
-    return False
+    Args:
+        passes: The passes, in descending order of confidence.
+        subjects: The Understat players to resolve.
+        ledger: Receives every match; also tells the driver who is already done.
+    """
+    for resolution_pass in passes:
+        for subject in subjects:
+            understat_player = subject.understat_player
+            if ledger.has_understat(understat_player.player_id):
+                continue
+
+            match = resolution_pass.attempt(subject)
+            if match is None:
+                continue
+
+            ledger.record_match(match.api_player, understat_player, match.confidence, match.method)
+            logger.debug(
+                "%s: '%s' ↔ '%s' (%s)",
+                resolution_pass.name,
+                understat_player.player_name,
+                match.api_player.name,
+                match.detail,
+            )
 
 
 def _get_top_candidates(
@@ -282,170 +300,24 @@ def resolve_players(
     # records, so no pass mutates matching state directly.
     ledger = ResolutionLedger(now=now)
 
-    # ── Pass 1: Exact name + same team ──
-    for u_player in understat_players:
-        if ledger.has_understat(u_player.player_id):
-            continue
-        norm_u = normalize_name(u_player.player_name)
-        u_team_id = team_mapping.get(normalize_name(u_player.team))
-        if u_team_id is None:
-            continue
+    # ── Build one subject per Understat player, normalizing once ──
+    subjects = [
+        ResolutionSubject(
+            understat_player=u_player,
+            normalized_name=normalize_name(u_player.player_name),
+            api_team_id=team_mapping.get(normalize_name(u_player.team)),
+        )
+        for u_player in understat_players
+    ]
 
-        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
-        for api_id in candidates_in_team:
-            if norm_u in pool.variants(api_id):
-                api_p = pool.player(api_id)
-                ledger.record_match(api_p, u_player, 1.0, "exact")
-                logger.debug(
-                    "Pass 1 exact: '%s' ↔ '%s' (team=%s)",
-                    u_player.player_name,
-                    api_p.name,
-                    u_player.team,
-                )
-                break
-
-    # ── Pass 2: Fuzzy name + same team ──
-    for u_player in understat_players:
-        if ledger.has_understat(u_player.player_id):
-            continue
-        u_team_id = team_mapping.get(normalize_name(u_player.team))
-        if u_team_id is None:
-            continue
-
-        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
-        norm_u = normalize_name(u_player.player_name)
-        best_score = 0.0
-        best_api_id: int | None = None
-        all_scores: list[float] = []
-        scores_by_id: dict[int, float] = {}
-        for api_id in candidates_in_team:
-            score = scorer.fuzzy_score(norm_u, pool.variants(api_id))
-            all_scores.append(score)
-            scores_by_id[api_id] = score
-            if score > best_score:
-                best_score = score
-                best_api_id = api_id
-
-        if best_api_id is not None and best_score >= scorer.thresholds.player_fuzzy:
-            if not scorer.has_conflict(all_scores):
-                api_p = pool.player(best_api_id)
-                ledger.record_match(api_p, u_player, 0.90, "fuzzy")
-                logger.debug(
-                    "Pass 2 fuzzy: '%s' ↔ '%s' (score=%.3f, team=%s)",
-                    u_player.player_name,
-                    api_p.name,
-                    best_score,
-                    u_player.team,
-                )
-            elif u_player.position:
-                # Conflict: multiple candidates within the conflict threshold of the
-                # top score. Try to break the tie via position compatibility.
-                top_candidate_ids = [
-                    api_id
-                    for api_id, score in scores_by_id.items()
-                    if score >= scorer.thresholds.player_fuzzy and (best_score - score) < scorer.thresholds.conflict
-                ]
-                compatible_ids = [
-                    api_id
-                    for api_id in top_candidate_ids
-                    if scorer.positions_compatible(u_player.position, pool.position_of(api_id))
-                ]
-                if len(compatible_ids) == 1:
-                    api_p = pool.player(compatible_ids[0])
-                    ledger.record_match(api_p, u_player, 0.88, "fuzzy")
-                    logger.debug(
-                        "Pass 2 fuzzy (position tiebreak): '%s' ↔ '%s' (score=%.3f, team=%s, position=%s)",
-                        u_player.player_name,
-                        api_p.name,
-                        best_score,
-                        u_player.team,
-                        u_player.position,
-                    )
-
-    # ── Pass 3: Cross-team fuzzy + transfer history ──
-    for u_player in understat_players:
-        if ledger.has_understat(u_player.player_id):
-            continue
-        all_unmatched_api = ledger.unmatched_among(pool.all_ids())
-        norm_u = normalize_name(u_player.player_name)
-        best_score = 0.0
-        best_api_id = None
-        all_scores = []
-        for api_id in all_unmatched_api:
-            score = scorer.fuzzy_score(norm_u, pool.variants(api_id))
-            all_scores.append(score)
-            if score > best_score:
-                best_score = score
-                best_api_id = api_id
-
-        if (
-            best_api_id is not None
-            and best_score >= scorer.thresholds.cross_team_fuzzy
-            and not scorer.has_conflict(all_scores)
-            and _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams)
-        ):
-            api_p = pool.player(best_api_id)
-            ledger.record_match(api_p, u_player, 0.70, "contextual")
-            logger.debug(
-                "Pass 3 contextual: '%s' ↔ '%s' (score=%.3f, transfer confirmed)",
-                u_player.player_name,
-                api_p.name,
-                best_score,
-            )
-
-    # ── Pass 4: Statistical fingerprint + same team ──
-    for u_player in understat_players:
-        if ledger.has_understat(u_player.player_id):
-            continue
-        u_team_id = team_mapping.get(normalize_name(u_player.team))
-        if u_team_id is None:
-            continue
-
-        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
-        norm_u = normalize_name(u_player.player_name)
-        stat_matches: list[int] = []
-        for api_id in candidates_in_team:
-            if scorer.fuzzy_score(norm_u, pool.variants(api_id)) < scorer.thresholds.pass4_name_floor:
-                continue
-            for stat in pool.stats_for_team(api_id, u_team_id):
-                if scorer.stats_match(
-                    stat.games.appearances,
-                    stat.games.minutes,
-                    u_player.games,
-                    u_player.minutes,
-                ):
-                    stat_matches.append(api_id)
-                    break
-
-        if len(stat_matches) == 1:
-            api_id = stat_matches[0]
-            api_p = pool.player(api_id)
-            api_position = pool.position_of(api_id)
-            # Check position compatibility before accepting the statistical match.
-            if not scorer.positions_compatible(u_player.position, api_position):
-                logger.debug(
-                    "Pass 4 statistical rejected (position mismatch): '%s' (pos=%s) ↔ '%s' (pos=%s)",
-                    u_player.player_name,
-                    u_player.position,
-                    api_p.name,
-                    api_position,
-                )
-            else:
-                ledger.record_match(api_p, u_player, 0.60, "statistical")
-                logger.debug(
-                    "Pass 4 statistical: '%s' ↔ '%s' (team=%s, games=%d, minutes=%d)",
-                    u_player.player_name,
-                    api_p.name,
-                    u_player.team,
-                    u_player.games,
-                    u_player.minutes,
-                )
-        elif len(stat_matches) > 1:
-            logger.debug(
-                "Pass 4 conflict: '%s' has %d stat matches in team, skipping",
-                u_player.player_name,
-                len(stat_matches),
-            )
+    # ── The 4 passes, in descending order of confidence (ADR-004) ──
+    passes: list[ResolutionPass] = [
+        ExactPass(pool, ledger),
+        FuzzyPass(pool, scorer, ledger),
+        ContextualPass(pool, scorer, ledger, raw_transfers, resolved_teams),
+        StatisticalPass(pool, scorer, ledger),
+    ]
+    _run_passes(passes, subjects, ledger)
 
     # ── Collect unresolved ──
     unresolved: list[UnresolvedPlayer] = []

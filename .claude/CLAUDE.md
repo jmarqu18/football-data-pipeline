@@ -295,7 +295,8 @@ sources:
 | `src/pipeline/loaders/api_football_recovery.py` | Completo — reintentos y recuperación de fallos parciales          |
 | `src/pipeline/loaders/understat_loader.py`      | Completo — soccerdata wrapper + validación Pydantic               |
 | `src/pipeline/observability.py`                 | Completo — logging namespaced + configuración idempotente fuera de Airflow |
-| `src/pipeline/entity_resolution.py`             | Completo — 4-pass resolution (team + player) + CSV report        |
+| `src/pipeline/entity_resolution.py`             | Completo — team resolution + driver de las 4 pasadas + CSV report |
+| `src/pipeline/resolution_passes.py`             | Completo — las 4 pasadas tras ResolutionPass (attempt → Match)    |
 | `src/pipeline/match_scoring.py`                 | Completo — scoring puro de coincidencias (sin estado)             |
 | `src/pipeline/name_normalization.py`            | Completo — preparación de nombres (decode, normalize, variantes)  |
 | `src/pipeline/candidate_pool.py`                | Completo — índice del lado API-Football (identidad, equipo, stats) |

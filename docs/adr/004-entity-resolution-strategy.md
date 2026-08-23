@@ -101,8 +101,9 @@ Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets
 
 - Spec detallado: `docs/entity-resolution-spec.md`
 - Vocabulario de dominio: `CONTEXT.md`
-- Implementación (estrategia de 4 pasadas): `src/pipeline/entity_resolution.py`
+- Implementación (las 4 pasadas): `src/pipeline/resolution_passes.py`
+- Implementación (orden de pasadas y ensamblaje): `src/pipeline/entity_resolution.py`
 - Implementación (scoring de candidatos): `src/pipeline/match_scoring.py`
 - Implementación (índice de candidatos): `src/pipeline/candidate_pool.py`
 - Implementación (estado de matcheo): `src/pipeline/resolution_ledger.py`
-- Tests: `tests/test_entity_resolution.py`, `tests/test_match_scoring.py`, `tests/test_candidate_pool.py`, `tests/test_resolution_ledger.py`
+- Tests: `tests/test_entity_resolution.py`, `tests/test_resolution_passes.py`, `tests/test_match_scoring.py`, `tests/test_candidate_pool.py`, `tests/test_resolution_ledger.py`

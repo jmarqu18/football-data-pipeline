@@ -22,7 +22,9 @@ El problema central del proyecto: API-Football y Understat identifican al mismo 
 | Término                   | Significado                                                                                                                                                |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Pasada** (_pass_)       | Un intento de emparejar, con un criterio y una confidence fijos. Hay cuatro, en orden descendente de confianza: exact, fuzzy, contextual, statistical.      |
-| **Candidato**             | Un jugador de API-Football que podría ser el jugador de Understat que se está resolviendo. Las pasadas puntúan candidatos.                                  |
+| **Sujeto** (_subject_)    | El jugador de Understat que se está resolviendo, con su nombre ya normalizado y su equipo ya traducido a `team_id` de API-Football.                         |
+| **Candidato**             | Un jugador de API-Football que podría ser el sujeto. Las pasadas puntúan candidatos.                                                                        |
+| **Match**                 | La decisión de una pasada: este sujeto es este candidato, con esta confidence y este método. Una pasada devuelve un match; no lo registra.                  |
 | **Confidence**            | Cuánto se fía el pipeline de un emparejamiento, en 0.0–1.0. La fija la pasada que lo produjo, no se calcula.                                                |
 | **Resolution method**     | Qué pasada produjo el emparejamiento: `exact`, `fuzzy`, `contextual`, `statistical` o `unresolved`. Se persiste en CLEAN.                                   |
 | **Single-source player**  | Jugador que existe en API-Football y que ninguna pasada emparejó. Llega igualmente a la tabla `players` con `resolution_method='unresolved'` y sin confidence. |
@@ -40,9 +42,16 @@ El problema central del proyecto: API-Football y Understat identifican al mismo 
 | [`candidate_pool`](src/pipeline/candidate_pool.py)         | **Buscar** en el lado API-Football: quién juega en un equipo, qué variantes de nombre tiene, qué posición, qué stats en qué club. Indexa; no decide. |
 | [`match_scoring`](src/pipeline/match_scoring.py)           | **Comparar** valores ya resueltos: score de nombre, compatibilidad de posición, huella estadística, detección de ambigüedad. No busca nada.          |
 | [`resolution_ledger`](src/pipeline/resolution_ledger.py)   | **Contabilizar**: quién ya está emparejado y qué se ha resuelto. Único escritor; convierte "nadie se empareja dos veces" en invariante.              |
-| [`entity_resolution`](src/pipeline/entity_resolution.py)   | **Decidir**: el orden de las pasadas, sus criterios de elegibilidad y sus confidences. Es lo único que dice *si* un emparejamiento cuenta.           |
+| [`resolution_passes`](src/pipeline/resolution_passes.py)   | **Decidir, una pasada cada vez**: las cuatro pasadas tras una interfaz, `attempt(subject) -> Match \| None`. Deciden; no registran.                  |
+| [`entity_resolution`](src/pipeline/entity_resolution.py)   | **Orquestar**: el orden de las pasadas, el ensamblaje de colaboradores y el cierre (no resueltos, single-source, resumen).                           |
 
-La separación entre los cuatro primeros y el último es deliberada: preparar, buscar, comparar y contabilizar no son decisiones de dominio; qué cuenta como emparejamiento válido sí lo es, y ADR-004 exige que viva en un solo sitio.
+La separación entre los cuatro primeros y los dos últimos es deliberada: preparar, buscar, comparar y contabilizar no son decisiones de dominio; qué cuenta como emparejamiento válido sí lo es, y ADR-004 exige que viva en un solo sitio.
+
+### Pasadas y driver
+
+Una pasada **decide y devuelve**; el driver `_run_passes` **registra y loguea**. Así el ledger conserva un único llamante por tipo de escritura, y una pasada se testea asertando sobre el `Match` devuelto en vez de inspeccionar estado.
+
+El orden es **pass-major** y es load-bearing: *todos* los sujetos pasan por la pasada 1 antes de que ninguno llegue a la 2. Al revés (cada sujeto por las cuatro pasadas seguidas), un match de baja confianza sobre un sujeto temprano reclamaría un candidato que otro posterior habría emparejado exacto — que es justo lo que el orden de confianza descendente existe para evitar.
 
 Pool y ledger no se conocen. Cuando una pasada quiere candidatos disponibles compone los dos — `ledger.unmatched_among(pool.in_team(team_id))` — de modo que cada uno se puede testear sin montar el otro.
 
