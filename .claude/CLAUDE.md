@@ -296,8 +296,9 @@ sources:
 | `src/pipeline/loaders/understat_loader.py`      | Completo — soccerdata wrapper + validación Pydantic               |
 | `src/pipeline/observability.py`                 | Completo — logging namespaced + configuración idempotente fuera de Airflow |
 | `src/pipeline/entity_resolution.py`             | Completo — 4-pass resolution (team + player) + CSV report        |
-| `src/pipeline/match_scoring.py`                 | Completo — scoring de coincidencias para entity resolution        |
+| `src/pipeline/match_scoring.py`                 | Completo — scoring puro de coincidencias (sin estado)             |
 | `src/pipeline/name_normalization.py`            | Completo — preparación de nombres (decode, normalize, variantes)  |
+| `src/pipeline/candidate_pool.py`                | Completo — índice del lado API-Football (identidad, equipo, stats) |
 | `src/pipeline/resolution_ledger.py`             | Completo — estado de matcheo + acumulación de ResolvedPlayer      |
 | `src/pipeline/transform_clean.py`               | Completo — Parquet read + entity resolution + PostgreSQL insert  |
 | `src/pipeline/feature_engineering.py`           | Completo — per-90, xG overperformance, percentiles                |

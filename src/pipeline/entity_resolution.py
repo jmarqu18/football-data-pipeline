@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import csv
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from rapidfuzz import fuzz
 
+from pipeline.candidate_pool import CandidatePool
 from pipeline.match_scoring import MatchScorer
 from pipeline.models.clean import (
     CandidateMatch,
@@ -31,7 +33,7 @@ from pipeline.models.raw import (
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
 )
-from pipeline.name_normalization import build_name_variants, decode_api_name, normalize_name
+from pipeline.name_normalization import decode_api_name, normalize_name
 from pipeline.resolution_ledger import ResolutionLedger
 
 logger = logging.getLogger(__name__)
@@ -197,29 +199,29 @@ def _check_transfer_history(
 
 def _get_top_candidates(
     scorer: MatchScorer,
+    pool: CandidatePool,
     understat_name: str,
-    api_players: dict[int, tuple[RawAPIFootballPlayer, list[str]]],
+    candidate_ids: Iterable[int],
     preferred_team_id: int | None = None,
-    api_by_team: dict[int, set[int]] | None = None,
     n: int = 3,
 ) -> list[CandidateMatch]:
     """Get top-N best fuzzy match candidates for an unresolved Understat player.
 
-    When ``preferred_team_id`` and ``api_by_team`` are provided, candidates
-    from the player's own team are ranked before cross-team candidates,
-    making the diagnostic report easier to act on.
+    When ``preferred_team_id`` is provided, candidates from the player's own
+    team are ranked before cross-team candidates, making the diagnostic report
+    easier to act on.
     """
     same_team_ids: set[int] = set()
-    if preferred_team_id is not None and api_by_team is not None:
-        same_team_ids = api_by_team.get(preferred_team_id, set())
+    if preferred_team_id is not None:
+        same_team_ids = pool.in_team(preferred_team_id)
 
     norm_understat = normalize_name(understat_name)
     same_team: list[tuple[float, int, str]] = []
     cross_team: list[tuple[float, int, str]] = []
 
-    for api_id, (api_player, variants) in api_players.items():
-        score = scorer.fuzzy_score(norm_understat, variants)
-        entry = (score, api_id, api_player.name)
+    for api_id in candidate_ids:
+        score = scorer.fuzzy_score(norm_understat, pool.variants(api_id))
+        entry = (score, api_id, pool.player(api_id).name)
         if api_id in same_team_ids:
             same_team.append(entry)
         else:
@@ -268,23 +270,13 @@ def resolve_players(
     raw_transfers = raw_transfers or []
     team_mapping = _build_team_mapping(resolved_teams)
 
-    # Index API-Football data
-    api_player_map: dict[int, RawAPIFootballPlayer] = {p.player_id: p for p in api_players}
-    api_variants_map: dict[int, list[str]] = {
-        p.player_id: build_name_variants(p.name, p.firstname, p.lastname) for p in api_players
-    }
-    api_stats_by_player: dict[int, list[RawAPIFootballPlayerStats]] = {}
-    for stat in api_stats:
-        api_stats_by_player.setdefault(stat.player_id, []).append(stat)
-
-    # Group API-Football players by team_id
-    api_by_team: dict[int, set[int]] = {}
-    for stat in api_stats:
-        api_by_team.setdefault(stat.team_id, set()).add(stat.player_id)
+    # Owns the API-Football side: identity, name variants, team membership and
+    # season stats, all indexed once for the whole run.
+    pool = CandidatePool(api_players, api_stats)
 
     # All candidate scoring (name similarity, position compatibility, statistical
     # fingerprinting, ambiguity detection) goes through this one interface.
-    scorer = MatchScorer(api_stats_by_player)
+    scorer = MatchScorer()
 
     # Owns which players are already matched and accumulates the resolved
     # records, so no pass mutates matching state directly.
@@ -299,11 +291,10 @@ def resolve_players(
         if u_team_id is None:
             continue
 
-        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
+        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
         for api_id in candidates_in_team:
-            variants = api_variants_map.get(api_id, [])
-            if norm_u in variants:
-                api_p = api_player_map[api_id]
+            if norm_u in pool.variants(api_id):
+                api_p = pool.player(api_id)
                 ledger.record_match(api_p, u_player, 1.0, "exact")
                 logger.debug(
                     "Pass 1 exact: '%s' ↔ '%s' (team=%s)",
@@ -321,15 +312,14 @@ def resolve_players(
         if u_team_id is None:
             continue
 
-        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
+        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
         norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id: int | None = None
         all_scores: list[float] = []
         scores_by_id: dict[int, float] = {}
         for api_id in candidates_in_team:
-            variants = api_variants_map.get(api_id, [])
-            score = scorer.fuzzy_score(norm_u, variants)
+            score = scorer.fuzzy_score(norm_u, pool.variants(api_id))
             all_scores.append(score)
             scores_by_id[api_id] = score
             if score > best_score:
@@ -338,7 +328,7 @@ def resolve_players(
 
         if best_api_id is not None and best_score >= scorer.thresholds.player_fuzzy:
             if not scorer.has_conflict(all_scores):
-                api_p = api_player_map[best_api_id]
+                api_p = pool.player(best_api_id)
                 ledger.record_match(api_p, u_player, 0.90, "fuzzy")
                 logger.debug(
                     "Pass 2 fuzzy: '%s' ↔ '%s' (score=%.3f, team=%s)",
@@ -355,9 +345,13 @@ def resolve_players(
                     for api_id, score in scores_by_id.items()
                     if score >= scorer.thresholds.player_fuzzy and (best_score - score) < scorer.thresholds.conflict
                 ]
-                compatible_ids = scorer.filter_by_position(top_candidate_ids, u_player.position)
+                compatible_ids = [
+                    api_id
+                    for api_id in top_candidate_ids
+                    if scorer.positions_compatible(u_player.position, pool.position_of(api_id))
+                ]
                 if len(compatible_ids) == 1:
-                    api_p = api_player_map[compatible_ids[0]]
+                    api_p = pool.player(compatible_ids[0])
                     ledger.record_match(api_p, u_player, 0.88, "fuzzy")
                     logger.debug(
                         "Pass 2 fuzzy (position tiebreak): '%s' ↔ '%s' (score=%.3f, team=%s, position=%s)",
@@ -372,14 +366,13 @@ def resolve_players(
     for u_player in understat_players:
         if ledger.has_understat(u_player.player_id):
             continue
-        all_unmatched_api = ledger.unmatched_among(api_player_map.keys())
+        all_unmatched_api = ledger.unmatched_among(pool.all_ids())
         norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id = None
         all_scores = []
         for api_id in all_unmatched_api:
-            variants = api_variants_map.get(api_id, [])
-            score = scorer.fuzzy_score(norm_u, variants)
+            score = scorer.fuzzy_score(norm_u, pool.variants(api_id))
             all_scores.append(score)
             if score > best_score:
                 best_score = score
@@ -391,7 +384,7 @@ def resolve_players(
             and not scorer.has_conflict(all_scores)
             and _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams)
         ):
-            api_p = api_player_map[best_api_id]
+            api_p = pool.player(best_api_id)
             ledger.record_match(api_p, u_player, 0.70, "contextual")
             logger.debug(
                 "Pass 3 contextual: '%s' ↔ '%s' (score=%.3f, transfer confirmed)",
@@ -408,16 +401,14 @@ def resolve_players(
         if u_team_id is None:
             continue
 
-        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
+        candidates_in_team = ledger.unmatched_among(pool.in_team(u_team_id))
         norm_u = normalize_name(u_player.player_name)
         stat_matches: list[int] = []
         for api_id in candidates_in_team:
-            variants = api_variants_map.get(api_id, [])
-            if scorer.fuzzy_score(norm_u, variants) < scorer.thresholds.pass4_name_floor:
+            if scorer.fuzzy_score(norm_u, pool.variants(api_id)) < scorer.thresholds.pass4_name_floor:
                 continue
-            stats_list = api_stats_by_player.get(api_id, [])
-            for stat in stats_list:
-                if stat.team_id == u_team_id and scorer.stats_match(
+            for stat in pool.stats_for_team(api_id, u_team_id):
+                if scorer.stats_match(
                     stat.games.appearances,
                     stat.games.minutes,
                     u_player.games,
@@ -428,15 +419,16 @@ def resolve_players(
 
         if len(stat_matches) == 1:
             api_id = stat_matches[0]
-            api_p = api_player_map[api_id]
+            api_p = pool.player(api_id)
+            api_position = pool.position_of(api_id)
             # Check position compatibility before accepting the statistical match.
-            if not scorer.filter_by_position([api_id], u_player.position):
+            if not scorer.positions_compatible(u_player.position, api_position):
                 logger.debug(
                     "Pass 4 statistical rejected (position mismatch): '%s' (pos=%s) ↔ '%s' (pos=%s)",
                     u_player.player_name,
                     u_player.position,
                     api_p.name,
-                    scorer.position_of(api_id),
+                    api_position,
                 )
             else:
                 ledger.record_match(api_p, u_player, 0.60, "statistical")
@@ -457,20 +449,17 @@ def resolve_players(
 
     # ── Collect unresolved ──
     unresolved: list[UnresolvedPlayer] = []
-    remaining_api = {
-        api_id: (api_player_map[api_id], api_variants_map.get(api_id, []))
-        for api_id in ledger.unmatched_among(api_player_map.keys())
-    }
+    remaining_api = ledger.unmatched_among(pool.all_ids())
 
     for u_player in understat_players:
         if not ledger.has_understat(u_player.player_id):
             u_team_id_for_report = team_mapping.get(normalize_name(u_player.team))
             top = _get_top_candidates(
                 scorer,
+                pool,
                 u_player.player_name,
                 remaining_api,
                 preferred_team_id=u_team_id_for_report,
-                api_by_team=api_by_team,
             )
             unresolved.append(
                 UnresolvedPlayer(
@@ -491,8 +480,8 @@ def resolve_players(
             )
 
     # Single-source API-Football players still reach the CLEAN players table.
-    for api_id in ledger.unmatched_among(api_player_map.keys()):
-        ledger.record_single_source(api_player_map[api_id])
+    for api_id in ledger.unmatched_among(pool.all_ids()):
+        ledger.record_single_source(pool.player(api_id))
 
     resolved = ledger.resolved_players()
 

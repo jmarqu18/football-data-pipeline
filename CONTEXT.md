@@ -34,14 +34,23 @@ El problema central del proyecto: API-Football y Understat identifican al mismo 
 
 ## Módulos del dominio
 
-| Módulo                                                            | De qué es dueño                                                                                                                                              |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`name_normalization`](src/pipeline/name_normalization.py)         | **Preparar** nombres para comparar: decodificar entidades HTML, quitar diacríticos, generar variantes. Produce texto preparado; no lo compara.               |
-| [`match_scoring`](src/pipeline/match_scoring.py)                   | **Comparar** un candidato con un jugador de Understat: score de nombre, compatibilidad de posición, huella estadística, detección de ambigüedad.              |
-| [`resolution_ledger`](src/pipeline/resolution_ledger.py)           | **Quién ya está emparejado** y qué se ha resuelto. Único escritor de los registros resueltos; convierte "nadie se empareja dos veces" en invariante.          |
-| [`entity_resolution`](src/pipeline/entity_resolution.py)           | **La estrategia**: el orden de las pasadas, sus criterios de elegibilidad y sus confidences. Es lo único que decide *si* un emparejamiento cuenta.            |
+| Módulo                                                    | De qué es dueño                                                                                                                                     |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`name_normalization`](src/pipeline/name_normalization.py) | **Preparar** nombres para comparar: decodificar entidades HTML, quitar diacríticos, generar variantes. Produce texto preparado; no lo compara.       |
+| [`candidate_pool`](src/pipeline/candidate_pool.py)         | **Buscar** en el lado API-Football: quién juega en un equipo, qué variantes de nombre tiene, qué posición, qué stats en qué club. Indexa; no decide. |
+| [`match_scoring`](src/pipeline/match_scoring.py)           | **Comparar** valores ya resueltos: score de nombre, compatibilidad de posición, huella estadística, detección de ambigüedad. No busca nada.          |
+| [`resolution_ledger`](src/pipeline/resolution_ledger.py)   | **Contabilizar**: quién ya está emparejado y qué se ha resuelto. Único escritor; convierte "nadie se empareja dos veces" en invariante.              |
+| [`entity_resolution`](src/pipeline/entity_resolution.py)   | **Decidir**: el orden de las pasadas, sus criterios de elegibilidad y sus confidences. Es lo único que dice *si* un emparejamiento cuenta.           |
 
-La separación entre los tres primeros y el cuarto es deliberada: preparar, comparar y contabilizar no son decisiones de dominio; qué cuenta como emparejamiento válido sí lo es, y ADR-004 exige que viva en un solo sitio.
+La separación entre los cuatro primeros y el último es deliberada: preparar, buscar, comparar y contabilizar no son decisiones de dominio; qué cuenta como emparejamiento válido sí lo es, y ADR-004 exige que viva en un solo sitio.
+
+Pool y ledger no se conocen. Cuando una pasada quiere candidatos disponibles compone los dos — `ledger.unmatched_among(pool.in_team(team_id))` — de modo que cada uno se puede testear sin montar el otro.
+
+### Candidate Pool
+
+Un jugador transferido a mitad de temporada tiene una fila de stats por club, así que `in_team` lo devuelve bajo los dos y `stats_for_team` acota al club preguntado — que es lo que hace comparables sus números con los de Understat, siempre por club.
+
+La identidad viene de `api_players` y la pertenencia a equipo de `api_stats`, dos listas distintas. Por eso `variants()` es indulgente y devuelve `[]` ante un id desconocido (las pasadas puntúan antes de saber quién gana), mientras que `player()` lanza `KeyError` (a esa llamada solo se llega tras elegir un candidato que el propio pool ofreció).
 
 ### Resolution Ledger
 

@@ -5,21 +5,17 @@ API-Football candidate, how well do they fit? — behind one interface.
 It holds no resolution strategy: the pass ordering, the eligibility rules and
 the confidence values live in ``pipeline.entity_resolution`` (see ADR-004).
 
-Name preparation (``normalize_name``, ``build_name_variants``) also stays in
-``pipeline.entity_resolution``: this module compares prepared text, it does not
-produce it.
+It compares prepared values and looks nothing up. Name preparation lives in
+``pipeline.name_normalization``; resolving an id to a position or a stats row
+lives in ``pipeline.candidate_pool``.
 
 See docs/entity-resolution-spec.md for the full design specification.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-
 from pydantic import BaseModel, ConfigDict, Field
 from rapidfuzz import fuzz
-
-from pipeline.models.raw import RawAPIFootballPlayerStats
 
 
 class ScoringThresholds(BaseModel):
@@ -119,23 +115,17 @@ def _parse_api_position(position: str | None) -> set[str]:
 class MatchScorer:
     """Scores API-Football candidates against an Understat player.
 
-    Constructed once per resolution run, alongside the other indexes built
-    from the raw API-Football data. Holds the season-stats index so that
-    position lookups happen in one place rather than in each pass.
+    Stateless apart from its thresholds: every method compares values the
+    caller has already looked up. Resolving an id to a name, a position or a
+    stats row is ``pipeline.candidate_pool``'s job.
     """
 
-    def __init__(
-        self,
-        api_stats_by_player: Mapping[int, list[RawAPIFootballPlayerStats]],
-        thresholds: ScoringThresholds | None = None,
-    ) -> None:
+    def __init__(self, thresholds: ScoringThresholds | None = None) -> None:
         """Initialize the scorer.
 
         Args:
-            api_stats_by_player: API-Football season stats indexed by player_id.
             thresholds: Tuning constants; production defaults when omitted.
         """
-        self.api_stats_by_player = api_stats_by_player
         self.thresholds = thresholds or ScoringThresholds()
 
     def fuzzy_score(self, understat_name: str, api_variants: list[str]) -> float:
@@ -179,20 +169,6 @@ class MatchScorer:
         sorted_scores = sorted(scores, reverse=True)
         return (sorted_scores[0] - sorted_scores[1]) < self.thresholds.conflict
 
-    def position_of(self, api_id: int) -> str | None:
-        """Return the API-Football position string for a player, from their season stats.
-
-        Args:
-            api_id: API-Football player_id.
-
-        Returns:
-            The first non-empty position found, or None if unknown.
-        """
-        for stat in self.api_stats_by_player.get(api_id, []):
-            if stat.games.position:
-                return stat.games.position
-        return None
-
     def positions_compatible(self, understat_pos: str | None, api_pos: str | None) -> bool:
         """Return True if two position strings are compatible (share at least one bucket).
 
@@ -210,29 +186,6 @@ class MatchScorer:
         if not us_buckets or not api_buckets:
             return True  # unknown position → no penalty
         return bool(us_buckets & api_buckets)
-
-    def filter_by_position(
-        self,
-        candidate_ids: Iterable[int],
-        understat_position: str | None,
-    ) -> list[int]:
-        """Keep only the candidates whose position is compatible with the Understat one.
-
-        Used both to break fuzzy ties (Pass 2) and to veto a statistical match
-        (Pass 4), so the compatibility rule lives in one place.
-
-        Args:
-            candidate_ids: API-Football player_ids to filter.
-            understat_position: Understat position string, may be None.
-
-        Returns:
-            The compatible subset, preserving input order.
-        """
-        return [
-            api_id
-            for api_id in candidate_ids
-            if self.positions_compatible(understat_position, self.position_of(api_id))
-        ]
 
     def stats_match(
         self,

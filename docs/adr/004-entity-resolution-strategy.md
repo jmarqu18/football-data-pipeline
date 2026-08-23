@@ -48,11 +48,11 @@ Los equipos (~20 en La Liga) se resuelven primero porque sus nombres son más es
 
 ### Normalización de nombres
 
-Se generan múltiples variantes desde los 3 campos de API-Football (`name`, `firstname`, `lastname`) y se comparan contra el nombre único de Understat. El método `MatchScorer.fuzzy_score` usa `token_sort_ratio` y `partial_ratio` con un length guard (`ScoringThresholds.partial_ratio_min_length_ratio = 0.6`) para evitar que variantes cortas inflen scores por substring match.
+Se generan múltiples variantes desde los 3 campos de API-Football (`name`, `firstname`, `lastname`) y se comparan contra el nombre único de Understat. Las variantes las construye `CandidatePool` al indexar; el método `MatchScorer.fuzzy_score` usa `token_sort_ratio` y `partial_ratio` con un length guard (`ScoringThresholds.partial_ratio_min_length_ratio = 0.6`) para evitar que variantes cortas inflen scores por substring match.
 
 ### Position mapping
 
-Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets canónicos API-Football (Goalkeeper, Defender, Midfielder, Attacker). La compatibilidad de posición se usa como tiebreaker en Pass 2 y como filtro en Pass 4, en ambos casos vía `MatchScorer.filter_by_position`.
+Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets canónicos API-Football (Goalkeeper, Defender, Midfielder, Attacker). La compatibilidad de posición se usa como tiebreaker en Pass 2 y como filtro en Pass 4. La regla vive en un único sitio, `MatchScorer.positions_compatible`; la posición del candidato la resuelve `CandidatePool.position_of`.
 
 ## Alternatives Considered
 
@@ -100,6 +100,9 @@ Las posiciones Understat (códigos: "M S", "D M S", "G") se mapean a los buckets
 ## Referencias
 
 - Spec detallado: `docs/entity-resolution-spec.md`
+- Vocabulario de dominio: `CONTEXT.md`
 - Implementación (estrategia de 4 pasadas): `src/pipeline/entity_resolution.py`
 - Implementación (scoring de candidatos): `src/pipeline/match_scoring.py`
-- Tests: `tests/test_entity_resolution.py`, `tests/test_match_scoring.py`
+- Implementación (índice de candidatos): `src/pipeline/candidate_pool.py`
+- Implementación (estado de matcheo): `src/pipeline/resolution_ledger.py`
+- Tests: `tests/test_entity_resolution.py`, `tests/test_match_scoring.py`, `tests/test_candidate_pool.py`, `tests/test_resolution_ledger.py`

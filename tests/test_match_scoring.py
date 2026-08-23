@@ -7,57 +7,17 @@ strategy that consumes this scoring is tested in test_entity_resolution.py.
 
 from __future__ import annotations
 
-from pipeline.entity_resolution import build_name_variants, normalize_name
 from pipeline.match_scoring import (
     MatchScorer,
     ScoringThresholds,
     _parse_api_position,
     _parse_understat_position,
 )
-from pipeline.models.raw import (
-    RawAPIFootballPlayerStats,
-    _APIFootballCards,
-    _APIFootballDribbles,
-    _APIFootballDuels,
-    _APIFootballFouls,
-    _APIFootballGames,
-    _APIFootballGoals,
-    _APIFootballPasses,
-    _APIFootballPenalty,
-    _APIFootballShots,
-    _APIFootballTackles,
-)
-
-_EMPTY_STATS_KWARGS = {
-    "shots": _APIFootballShots(),
-    "goals": _APIFootballGoals(),
-    "passes": _APIFootballPasses(),
-    "tackles": _APIFootballTackles(),
-    "duels": _APIFootballDuels(),
-    "dribbles": _APIFootballDribbles(),
-    "fouls": _APIFootballFouls(),
-    "cards": _APIFootballCards(),
-    "penalty": _APIFootballPenalty(),
-}
+from pipeline.name_normalization import build_name_variants, normalize_name
 
 
-def _make_stats(player_id: int, position: str | None = None) -> RawAPIFootballPlayerStats:
-    return RawAPIFootballPlayerStats(
-        player_id=player_id,
-        team_id=529,
-        team_name="Test FC",
-        league_id=140,
-        season=2024,
-        games=_APIFootballGames(appearances=0, minutes=0, position=position),
-        **_EMPTY_STATS_KWARGS,
-    )
-
-
-def _scorer(
-    api_stats_by_player: dict[int, list[RawAPIFootballPlayerStats]] | None = None,
-    thresholds: ScoringThresholds | None = None,
-) -> MatchScorer:
-    return MatchScorer(api_stats_by_player or {}, thresholds=thresholds)
+def _scorer(thresholds: ScoringThresholds | None = None) -> MatchScorer:
+    return MatchScorer(thresholds=thresholds)
 
 
 def _score(understat_name: str, api_variants: list[str]) -> float:
@@ -262,74 +222,6 @@ class TestPositionMapping:
 
     def test_none_api_always_compatible(self):
         assert _scorer().positions_compatible("D", None) is True
-
-
-# ─────────────────────────────────────────────────────────────
-# Test: position_of
-# ─────────────────────────────────────────────────────────────
-
-
-class TestPositionOf:
-    """Position lookup from the season-stats index."""
-
-    def test_returns_position_from_stats(self):
-        scorer = _scorer({1: [_make_stats(1, position="Midfielder")]})
-        assert scorer.position_of(1) == "Midfielder"
-
-    def test_returns_first_non_empty_position(self):
-        scorer = _scorer({1: [_make_stats(1, position=None), _make_stats(1, position="Defender")]})
-        assert scorer.position_of(1) == "Defender"
-
-    def test_unknown_player_returns_none(self):
-        assert _scorer().position_of(999) is None
-
-    def test_player_without_position_returns_none(self):
-        scorer = _scorer({1: [_make_stats(1, position=None)]})
-        assert scorer.position_of(1) is None
-
-
-# ─────────────────────────────────────────────────────────────
-# Test: filter_by_position
-# ─────────────────────────────────────────────────────────────
-
-
-class TestFilterByPosition:
-    """The shared filter used to break Pass 2 ties and veto Pass 4 matches."""
-
-    def test_keeps_only_compatible_candidates(self):
-        scorer = _scorer(
-            {
-                1: [_make_stats(1, position="Goalkeeper")],
-                2: [_make_stats(2, position="Attacker")],
-            }
-        )
-        assert scorer.filter_by_position([1, 2], "F S") == [2]
-
-    def test_keeps_candidates_with_unknown_position(self):
-        scorer = _scorer({1: [_make_stats(1, position=None)]})
-        assert scorer.filter_by_position([1], "G") == [1]
-
-    def test_unknown_understat_position_keeps_all(self):
-        scorer = _scorer(
-            {
-                1: [_make_stats(1, position="Goalkeeper")],
-                2: [_make_stats(2, position="Attacker")],
-            }
-        )
-        assert scorer.filter_by_position([1, 2], None) == [1, 2]
-
-    def test_preserves_input_order(self):
-        scorer = _scorer(
-            {
-                1: [_make_stats(1, position="Defender")],
-                2: [_make_stats(2, position="Defender")],
-            }
-        )
-        assert scorer.filter_by_position([2, 1], "D") == [2, 1]
-
-    def test_empty_when_nothing_compatible(self):
-        scorer = _scorer({1: [_make_stats(1, position="Goalkeeper")]})
-        assert scorer.filter_by_position([1], "F") == []
 
 
 # ─────────────────────────────────────────────────────────────

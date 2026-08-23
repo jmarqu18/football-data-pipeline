@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from pipeline.candidate_pool import CandidatePool
 from pipeline.entity_resolution import (
     _get_top_candidates,
     resolve_players,
@@ -43,7 +44,6 @@ from pipeline.models.raw import (
     _APIFootballShots,
     _APIFootballTackles,
 )
-from pipeline.name_normalization import build_name_variants
 
 # ─────────────────────────────────────────────────────────────
 # Helpers to build fixture objects
@@ -872,27 +872,25 @@ def test_get_top_candidates_same_team_ranked_first() -> None:
     girona_id = 19
     other_team_id = 100
 
-    arnau_coromina = _make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina")
-    arnau_ortiz = _make_api_player(183948, "Arnau Ortiz", firstname="Arnau", lastname="Ortiz")
-    a_danjuma = _make_api_player(83, "A. Danjuma", firstname="Arnaut", lastname="Danjuma Groeneveld")
-
-    remaining_api = {
-        490984: (arnau_coromina, build_name_variants("Arnau Coromina", "Arnau", "Coromina")),
-        183948: (arnau_ortiz, build_name_variants("Arnau Ortiz", "Arnau", "Ortiz")),
-        83: (a_danjuma, build_name_variants("A. Danjuma", "Arnaut", "Danjuma Groeneveld")),
-    }
-
-    api_by_team = {
-        girona_id: {83},
-        other_team_id: {490984, 183948},
-    }
+    pool = CandidatePool(
+        [
+            _make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina"),
+            _make_api_player(183948, "Arnau Ortiz", firstname="Arnau", lastname="Ortiz"),
+            _make_api_player(83, "A. Danjuma", firstname="Arnaut", lastname="Danjuma Groeneveld"),
+        ],
+        [
+            _make_api_stats(490984, other_team_id, "Other FC"),
+            _make_api_stats(183948, other_team_id, "Other FC"),
+            _make_api_stats(83, girona_id, "Girona"),
+        ],
+    )
 
     candidates = _get_top_candidates(
-        MatchScorer({}),
+        MatchScorer(),
+        pool,
         understat_name="Arnaut Danjuma Groeneveld",
-        api_players=remaining_api,
+        candidate_ids=pool.all_ids(),
         preferred_team_id=girona_id,
-        api_by_team=api_by_team,
         n=3,
     )
 
@@ -904,17 +902,17 @@ def test_get_top_candidates_same_team_ranked_first() -> None:
 
 def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
     """When preferred_team_id is None, original behaviour is preserved."""
-    arnau_coromina = _make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina")
-    remaining_api = {
-        490984: (arnau_coromina, build_name_variants("Arnau Coromina", "Arnau", "Coromina")),
-    }
+    pool = CandidatePool(
+        [_make_api_player(490984, "Arnau Coromina", firstname="Arnau", lastname="Coromina")],
+        [],
+    )
 
     candidates = _get_top_candidates(
-        MatchScorer({}),
+        MatchScorer(),
+        pool,
         understat_name="Arnau Coromina",
-        api_players=remaining_api,
+        candidate_ids=pool.all_ids(),
         preferred_team_id=None,
-        api_by_team={},
         n=3,
     )
 
