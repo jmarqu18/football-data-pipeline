@@ -10,21 +10,17 @@ See docs/entity-resolution-spec.md for the full design specification.
 from __future__ import annotations
 
 import csv
-import html
 import logging
-import re
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rapidfuzz import fuzz
-from unidecode import unidecode
 
 from pipeline.match_scoring import MatchScorer
 from pipeline.models.clean import (
     CandidateMatch,
     ResolutionMethod,
     ResolutionResult,
-    ResolvedPlayer,
     ResolvedTeam,
     UnresolvedPlayer,
 )
@@ -35,80 +31,10 @@ from pipeline.models.raw import (
     RawAPIFootballTransfer,
     RawUnderstatPlayerSeason,
 )
+from pipeline.name_normalization import build_name_variants, decode_api_name, normalize_name
+from pipeline.resolution_ledger import ResolutionLedger
 
 logger = logging.getLogger(__name__)
-
-# ─────────────────────────────────────────────────────────────
-# Name normalization utilities
-# ─────────────────────────────────────────────────────────────
-
-_WHITESPACE_RE = re.compile(r"\s+")
-
-
-def decode_api_name(name: str) -> str:
-    """Decode HTML entities in an API-Football name string.
-
-    API-Football occasionally returns names with HTML entities
-    (e.g. ``"E. Eto&apos;o Pineda"``).  This function decodes them to
-    their Unicode equivalents before the value is stored in the CLEAN layer.
-
-    Examples:
-        >>> decode_api_name("E. Eto&apos;o Pineda")
-        "E. Eto'o Pineda"
-        >>> decode_api_name("Marcelo &amp; Silva")
-        'Marcelo & Silva'
-    """
-    return html.unescape(name)
-
-
-def normalize_name(name: str) -> str:
-    """Normalize a player or team name for comparison.
-
-    Applies: HTML unescape → unidecode (strip diacritics) → lowercase →
-    strip → collapse multiple whitespace into single space.
-
-    HTML entities are unescaped first so that ``"Eto&apos;o"`` and
-    ``"Eto'o"`` compare equal after normalization.
-
-    Examples:
-        >>> normalize_name("Vinícius Júnior")
-        'vinicius junior'
-        >>> normalize_name("  Pedro  González   López  ")
-        'pedro gonzalez lopez'
-        >>> normalize_name("E. Eto&apos;o Pineda")
-        "e. eto'o pineda"
-    """
-    return _WHITESPACE_RE.sub(" ", unidecode(html.unescape(name)).lower().strip())
-
-
-def build_name_variants(
-    name: str,
-    firstname: str | None = None,
-    lastname: str | None = None,
-) -> list[str]:
-    """Generate normalized name variants from API-Football player fields.
-
-    Returns a deduplicated list of all meaningful name forms to maximize
-    the chance of matching against Understat's single player_name field.
-    """
-    variants: set[str] = set()
-    norm_name = normalize_name(name)
-    if norm_name:
-        variants.add(norm_name)
-    if firstname:
-        norm_first = normalize_name(firstname)
-        if norm_first:
-            variants.add(norm_first)
-    if lastname:
-        norm_last = normalize_name(lastname)
-        if norm_last:
-            variants.add(norm_last)
-    if firstname and lastname:
-        combined = normalize_name(f"{firstname} {lastname}")
-        if combined:
-            variants.add(combined)
-    return list(variants)
-
 
 # ─────────────────────────────────────────────────────────────
 # Team resolution
@@ -228,37 +154,6 @@ def resolve_teams(
 # ─────────────────────────────────────────────────────────────
 # Player resolution
 # ─────────────────────────────────────────────────────────────
-
-
-def _parse_birth_date(raw_birth_date: str | None, api_player_id: int) -> date | None:
-    """Convert an API-Football ISO birth date string into a date.
-
-    API-Football returns birth dates as ISO strings ("2002-11-25"); the CLEAN
-    layer stores them as dates. Doing the conversion here keeps the RAW→CLEAN
-    transformation visible instead of leaving it to Pydantic coercion.
-
-    A blank or unparseable value yields None rather than raising: one bad record
-    must not abort resolution for every other player. Unparseable values are
-    logged as WARNING so the bad data stays visible.
-
-    Args:
-        raw_birth_date: ISO date string from RawAPIFootballPlayer, or None.
-        api_player_id: API-Football player_id, for the warning message.
-
-    Returns:
-        The parsed date, or None when the source value is missing or invalid.
-    """
-    if raw_birth_date is None or not raw_birth_date.strip():
-        return None
-    try:
-        return date.fromisoformat(raw_birth_date)
-    except ValueError:
-        logger.warning(
-            "Invalid birth_date %r for API-Football player %d, storing NULL",
-            raw_birth_date,
-            api_player_id,
-        )
-        return None
 
 
 def _build_team_mapping(
@@ -391,48 +286,25 @@ def resolve_players(
     # fingerprinting, ambiguity detection) goes through this one interface.
     scorer = MatchScorer(api_stats_by_player)
 
-    # Track which players have been matched
-    matched_api: set[int] = set()
-    matched_understat: set[int] = set()
-    resolved: list[ResolvedPlayer] = []
-
-    def _make_resolved(
-        api_p: RawAPIFootballPlayer,
-        u_p: RawUnderstatPlayerSeason,
-        confidence: float,
-        method: ResolutionMethod,
-    ) -> ResolvedPlayer:
-        decoded_name = decode_api_name(api_p.name)
-        return ResolvedPlayer(
-            canonical_name=decoded_name,
-            known_name=u_p.player_name if u_p.player_name != decoded_name else None,
-            api_football_id=api_p.player_id,
-            understat_id=u_p.player_id,
-            birth_date=_parse_birth_date(api_p.birth_date, api_p.player_id),
-            nationality=api_p.nationality,
-            photo_url=api_p.photo_url,
-            resolution_confidence=confidence,
-            resolution_method=method,
-            resolved_at=now,
-        )
+    # Owns which players are already matched and accumulates the resolved
+    # records, so no pass mutates matching state directly.
+    ledger = ResolutionLedger(now=now)
 
     # ── Pass 1: Exact name + same team ──
     for u_player in understat_players:
-        if u_player.player_id in matched_understat:
+        if ledger.has_understat(u_player.player_id):
             continue
         norm_u = normalize_name(u_player.player_name)
         u_team_id = team_mapping.get(normalize_name(u_player.team))
         if u_team_id is None:
             continue
 
-        candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
+        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
         for api_id in candidates_in_team:
             variants = api_variants_map.get(api_id, [])
             if norm_u in variants:
                 api_p = api_player_map[api_id]
-                resolved.append(_make_resolved(api_p, u_player, 1.0, "exact"))
-                matched_api.add(api_id)
-                matched_understat.add(u_player.player_id)
+                ledger.record_match(api_p, u_player, 1.0, "exact")
                 logger.debug(
                     "Pass 1 exact: '%s' ↔ '%s' (team=%s)",
                     u_player.player_name,
@@ -443,13 +315,13 @@ def resolve_players(
 
     # ── Pass 2: Fuzzy name + same team ──
     for u_player in understat_players:
-        if u_player.player_id in matched_understat:
+        if ledger.has_understat(u_player.player_id):
             continue
         u_team_id = team_mapping.get(normalize_name(u_player.team))
         if u_team_id is None:
             continue
 
-        candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
+        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
         norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id: int | None = None
@@ -467,9 +339,7 @@ def resolve_players(
         if best_api_id is not None and best_score >= scorer.thresholds.player_fuzzy:
             if not scorer.has_conflict(all_scores):
                 api_p = api_player_map[best_api_id]
-                resolved.append(_make_resolved(api_p, u_player, 0.90, "fuzzy"))
-                matched_api.add(best_api_id)
-                matched_understat.add(u_player.player_id)
+                ledger.record_match(api_p, u_player, 0.90, "fuzzy")
                 logger.debug(
                     "Pass 2 fuzzy: '%s' ↔ '%s' (score=%.3f, team=%s)",
                     u_player.player_name,
@@ -488,9 +358,7 @@ def resolve_players(
                 compatible_ids = scorer.filter_by_position(top_candidate_ids, u_player.position)
                 if len(compatible_ids) == 1:
                     api_p = api_player_map[compatible_ids[0]]
-                    resolved.append(_make_resolved(api_p, u_player, 0.88, "fuzzy"))
-                    matched_api.add(compatible_ids[0])
-                    matched_understat.add(u_player.player_id)
+                    ledger.record_match(api_p, u_player, 0.88, "fuzzy")
                     logger.debug(
                         "Pass 2 fuzzy (position tiebreak): '%s' ↔ '%s' (score=%.3f, team=%s, position=%s)",
                         u_player.player_name,
@@ -502,9 +370,9 @@ def resolve_players(
 
     # ── Pass 3: Cross-team fuzzy + transfer history ──
     for u_player in understat_players:
-        if u_player.player_id in matched_understat:
+        if ledger.has_understat(u_player.player_id):
             continue
-        all_unmatched_api = set(api_player_map.keys()) - matched_api
+        all_unmatched_api = ledger.unmatched_among(api_player_map.keys())
         norm_u = normalize_name(u_player.player_name)
         best_score = 0.0
         best_api_id = None
@@ -524,9 +392,7 @@ def resolve_players(
             and _check_transfer_history(best_api_id, u_player.team, raw_transfers, resolved_teams)
         ):
             api_p = api_player_map[best_api_id]
-            resolved.append(_make_resolved(api_p, u_player, 0.70, "contextual"))
-            matched_api.add(best_api_id)
-            matched_understat.add(u_player.player_id)
+            ledger.record_match(api_p, u_player, 0.70, "contextual")
             logger.debug(
                 "Pass 3 contextual: '%s' ↔ '%s' (score=%.3f, transfer confirmed)",
                 u_player.player_name,
@@ -536,13 +402,13 @@ def resolve_players(
 
     # ── Pass 4: Statistical fingerprint + same team ──
     for u_player in understat_players:
-        if u_player.player_id in matched_understat:
+        if ledger.has_understat(u_player.player_id):
             continue
         u_team_id = team_mapping.get(normalize_name(u_player.team))
         if u_team_id is None:
             continue
 
-        candidates_in_team = api_by_team.get(u_team_id, set()) - matched_api
+        candidates_in_team = ledger.unmatched_among(api_by_team.get(u_team_id, set()))
         norm_u = normalize_name(u_player.player_name)
         stat_matches: list[int] = []
         for api_id in candidates_in_team:
@@ -573,9 +439,7 @@ def resolve_players(
                     scorer.position_of(api_id),
                 )
             else:
-                resolved.append(_make_resolved(api_p, u_player, 0.60, "statistical"))
-                matched_api.add(api_id)
-                matched_understat.add(u_player.player_id)
+                ledger.record_match(api_p, u_player, 0.60, "statistical")
                 logger.debug(
                     "Pass 4 statistical: '%s' ↔ '%s' (team=%s, games=%d, minutes=%d)",
                     u_player.player_name,
@@ -595,11 +459,11 @@ def resolve_players(
     unresolved: list[UnresolvedPlayer] = []
     remaining_api = {
         api_id: (api_player_map[api_id], api_variants_map.get(api_id, []))
-        for api_id in set(api_player_map.keys()) - matched_api
+        for api_id in ledger.unmatched_among(api_player_map.keys())
     }
 
     for u_player in understat_players:
-        if u_player.player_id not in matched_understat:
+        if not ledger.has_understat(u_player.player_id):
             u_team_id_for_report = team_mapping.get(normalize_name(u_player.team))
             top = _get_top_candidates(
                 scorer,
@@ -626,23 +490,11 @@ def resolve_players(
                 top[0].fuzzy_score if top else 0.0,
             )
 
-    for api_id in set(api_player_map.keys()) - matched_api:
-        api_p = api_player_map[api_id]
-        # Single-source API-Football player → add as resolved with only api_football_id
-        resolved.append(
-            ResolvedPlayer(
-                canonical_name=decode_api_name(api_p.name),
-                known_name=None,
-                api_football_id=api_p.player_id,
-                understat_id=None,
-                birth_date=_parse_birth_date(api_p.birth_date, api_p.player_id),
-                nationality=api_p.nationality,
-                photo_url=api_p.photo_url,
-                resolution_confidence=None,
-                resolution_method="unresolved",
-                resolved_at=now,
-            )
-        )
+    # Single-source API-Football players still reach the CLEAN players table.
+    for api_id in ledger.unmatched_among(api_player_map.keys()):
+        ledger.record_single_source(api_player_map[api_id])
+
+    resolved = ledger.resolved_players()
 
     # ── Log summary ──
     method_counts: dict[str, int] = {}

@@ -297,6 +297,8 @@ sources:
 | `src/pipeline/observability.py`                 | Completo — logging namespaced + configuración idempotente fuera de Airflow |
 | `src/pipeline/entity_resolution.py`             | Completo — 4-pass resolution (team + player) + CSV report        |
 | `src/pipeline/match_scoring.py`                 | Completo — scoring de coincidencias para entity resolution        |
+| `src/pipeline/name_normalization.py`            | Completo — preparación de nombres (decode, normalize, variantes)  |
+| `src/pipeline/resolution_ledger.py`             | Completo — estado de matcheo + acumulación de ResolvedPlayer      |
 | `src/pipeline/transform_clean.py`               | Completo — Parquet read + entity resolution + PostgreSQL insert  |
 | `src/pipeline/feature_engineering.py`           | Completo — per-90, xG overperformance, percentiles                |
 | `src/pipeline/export_enriched.py`               | Completo — vista plana FEATURES+CLEAN → SQLite/Datasette          |
