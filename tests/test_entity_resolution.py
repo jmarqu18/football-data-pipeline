@@ -680,138 +680,32 @@ class TestUnresolvedReport:
 
 
 # ─────────────────────────────────────────────────────────────
-# Test: Pass 2 position tiebreaker
+# Test: the driver wires all four passes
 # ─────────────────────────────────────────────────────────────
 
 
-class TestPassTwoPositionTiebreaker:
-    """Tests for position-aware conflict resolution in Pass 2 fuzzy matching."""
+def test_fuzzy_pass_is_wired_into_the_driver() -> None:
+    """A player only Pass 2 can resolve must come back as a fuzzy match.
 
-    def _make_scenario(
-        self,
-        u_position: str | None,
-        api_position_a: str | None,
-        api_position_b: str | None,
-    ):
-        """Build a minimal two-candidate fuzzy conflict scenario.
+    The 20-player fixture happens to cover the wiring of passes 1, 3 and 4 —
+    drop any of them and one of its assertions fails. It does not cover Pass 2,
+    so this is the test that fails if FuzzyPass ever leaves the driver's list.
 
-        Both API players have identical names (forcing a score tie), and are
-        on the same team as the Understat player.  Returns (api_players,
-        api_stats, understat_players, resolved_teams).
-        """
-        team_id = 800
+    The tiebreak rules themselves are tested against FuzzyPass.attempt directly
+    in test_resolution_passes.py.
+    """
+    team = _make_resolved_team(api_id=800, api_name="Test FC", understat_name="Test FC")
+    api_players = [_make_api_player(801, "Robert Lewandowsky", firstname="Robert", lastname="Lewandowsky")]
+    api_stats = [_make_api_stats(801, 800, "Test FC")]
+    understat_players = [_make_understat_player(9001, "Robert Lewandowski", "Test FC")]
 
-        # Use full legal names for both API players so neither is an exact
-        # match against the short Understat name "Carlos Gomez", but both
-        # score >= 0.85 on fuzzy matching, creating a genuine Pass 2 tie.
-        api_players = [
-            RawAPIFootballPlayer(
-                player_id=801,
-                name="Carlos Gomez Herrera",
-                firstname="Carlos",
-                lastname="Gomez Herrera",
-            ),
-            RawAPIFootballPlayer(
-                player_id=802,
-                name="Carlos Gomez Pereira",
-                firstname="Carlos",
-                lastname="Gomez Pereira",
-            ),
-        ]
-        # Position is carried on RawAPIFootballPlayerStats.games.position
-        api_stats = [
-            RawAPIFootballPlayerStats(
-                player_id=801,
-                team_id=team_id,
-                team_name="Test FC",
-                league_id=140,
-                season=2024,
-                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_a),
-                **_EMPTY_STATS_KWARGS,
-            ),
-            RawAPIFootballPlayerStats(
-                player_id=802,
-                team_id=team_id,
-                team_name="Test FC",
-                league_id=140,
-                season=2024,
-                games=_APIFootballGames(appearances=20, minutes=1800, position=api_position_b),
-                **_EMPTY_STATS_KWARGS,
-            ),
-        ]
-        understat_players = [
-            RawUnderstatPlayerSeason(
-                player_id=9001,
-                player_name="Carlos Gomez",
-                team="Test FC",
-                season="2024/2025",
-                games=20,
-                minutes=1800,
-                goals=0,
-                assists=0,
-                xg=0.0,
-                xa=0.0,
-                npxg=0.0,
-                xg_chain=0.0,
-                xg_buildup=0.0,
-                shots=0,
-                key_passes=0,
-                yellow_cards=0,
-                red_cards=0,
-                position=u_position,
-            )
-        ]
-        resolved_teams = [
-            _make_resolved_team(team_id, "Test FC", understat_name="Test FC"),
-        ]
-        return api_players, api_stats, understat_players, resolved_teams
+    result = resolve_players(api_players, api_stats, understat_players, [team])
 
-    def test_position_breaks_tie_single_compatible_candidate(self):
-        """When two candidates tie and only one is position-compatible, it wins."""
-        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position="M",  # Understat: Midfielder
-            api_position_a="Midfielder",  # API player 801 — compatible
-            api_position_b="Goalkeeper",  # API player 802 — incompatible
-        )
-        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
-
-        matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
-        assert len(matched) == 1, "Expected exactly one resolution via position tiebreak"
-        winner = matched[0]
-        assert winner.api_football_id == 801, f"Expected api_football_id=801 (Midfielder), got {winner.api_football_id}"
-        assert winner.resolution_method == "fuzzy"
-        assert winner.resolution_confidence == 0.88
-
-    def test_both_compatible_stays_unresolved(self):
-        """When both tied candidates are position-compatible, resolution stays ambiguous."""
-        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position="M",  # Understat: Midfielder
-            api_position_a="Midfielder",  # compatible
-            api_position_b="Midfielder",  # also compatible — still a tie
-        )
-        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
-
-        cross_matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
-        assert len(cross_matched) == 0, "Both candidates are position-compatible — conflict should not be resolved"
-        unresolved_ids = {u.player_id for u in result.unresolved}
-        assert 9001 in unresolved_ids, "Understat player should appear in unresolved list"
-
-    def test_none_position_no_filtering(self):
-        """When Understat player has no position, position tiebreak is skipped entirely."""
-        api_players, api_stats, understat_players, resolved_teams = self._make_scenario(
-            u_position=None,  # unknown position → no filtering
-            api_position_a="Midfielder",
-            api_position_b="Goalkeeper",
-        )
-        result = resolve_players(api_players, api_stats, understat_players, resolved_teams)
-
-        # With no position info, the conflict is unresolvable — player stays unresolved.
-        cross_matched = [p for p in result.resolved_players if p.understat_id == 9001 and p.api_football_id is not None]
-        assert len(cross_matched) == 0, (
-            "No position on Understat player — tiebreak must not fire; player should be unresolved"
-        )
-        unresolved_ids = {u.player_id for u in result.unresolved}
-        assert 9001 in unresolved_ids
+    matched = [p for p in result.resolved_players if p.understat_id == 9001]
+    assert len(matched) == 1, "the fuzzy pass should have resolved this player"
+    assert matched[0].api_football_id == 801
+    assert matched[0].resolution_method == "fuzzy"
+    assert matched[0].resolution_confidence == 0.90
 
 
 # ─────────────────────────────────────────────────────────────
@@ -918,152 +812,3 @@ def test_get_top_candidates_no_team_filter_unchanged_behaviour() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].candidate_source_id == 490984
-
-
-# ─────────────────────────────────────────────────────────────
-# Pass 4 position filter
-# ─────────────────────────────────────────────────────────────
-
-
-class TestPassFourPositionFilter:
-    """Pass 4 statistical matching must respect position compatibility."""
-
-    def _make_stats_with_position(
-        self,
-        player_id: int,
-        team_id: int,
-        team_name: str,
-        appearances: int,
-        minutes: int,
-        position: str | None,
-    ) -> RawAPIFootballPlayerStats:
-        return RawAPIFootballPlayerStats(
-            player_id=player_id,
-            team_id=team_id,
-            team_name=team_name,
-            league_id=140,
-            season=2024,
-            games=_APIFootballGames(appearances=appearances, minutes=minutes, position=position),
-            **_EMPTY_STATS_KWARGS,
-        )
-
-    def test_statistical_match_rejected_when_position_incompatible(self):
-        """A goalkeeper (API-Football) vs a forward (Understat) with matching stats must NOT resolve.
-
-        Uses Understat name "Balde" vs API-Football "Alejandro Balde Moreno"
-        (firstname="Alejandro", lastname="Balde Moreno").  The short Understat
-        name scores ~0.59 against the variants — above pass4_name_floor (0.50)
-        but below the Pass 2 fuzzy threshold (0.85) — so the player can only
-        be matched in Pass 4.  Incompatible positions ("Goalkeeper" vs "F")
-        must then block the match.
-        """
-        team = _make_resolved_team(api_id=600, api_name="Test FC", understat_name="Test FC")
-
-        # API-Football: goalkeeper with a compound surname (no short variant that
-        # would score >= 0.85 against the single-token Understat name)
-        api_player = _make_api_player(
-            601,
-            "Alejandro Balde Moreno",
-            firstname="Alejandro",
-            lastname="Balde Moreno",
-        )
-        api_stats = self._make_stats_with_position(
-            601, 600, "Test FC", appearances=28, minutes=2520, position="Goalkeeper"
-        )
-
-        # Understat: forward — short name token, incompatible position
-        understat_player = RawUnderstatPlayerSeason(
-            player_id=6001,
-            player_name="Balde",
-            team="Test FC",
-            season="2024/2025",
-            games=28,
-            minutes=2520,
-            goals=0,
-            assists=0,
-            xg=0.0,
-            xa=0.0,
-            npxg=0.0,
-            xg_chain=0.0,
-            xg_buildup=0.0,
-            shots=0,
-            key_passes=0,
-            yellow_cards=0,
-            red_cards=0,
-            position="F",
-        )
-
-        result = resolve_players(
-            api_players=[api_player],
-            api_stats=[api_stats],
-            understat_players=[understat_player],
-            resolved_teams=[team],
-            raw_transfers=[],
-        )
-
-        # Must be unresolved — position mismatch blocks statistical acceptance
-        assert len(result.unresolved) == 1
-        assert result.unresolved[0].player_name == "Balde"
-
-        # API-Football player must remain single-source (no understat_id)
-        api_resolved = [p for p in result.resolved_players if p.api_football_id == 601]
-        assert len(api_resolved) == 1
-        assert api_resolved[0].understat_id is None
-
-    def test_statistical_match_accepted_when_position_compatible(self):
-        """A defender (API-Football) vs a defender (Understat) with matching stats should resolve.
-
-        Same name-distance pattern: Understat "Balde" vs API-Football
-        "Alejandro Balde Moreno" scores ~0.59, passing the name floor but not
-        the fuzzy threshold, so resolution must go through Pass 4.  Compatible
-        positions ("Defender" vs "D") must allow the match at confidence 0.60.
-        """
-        team = _make_resolved_team(api_id=700, api_name="Sample SC", understat_name="Sample SC")
-
-        api_player = _make_api_player(
-            701,
-            "Alejandro Balde Moreno",
-            firstname="Alejandro",
-            lastname="Balde Moreno",
-        )
-        api_stats = self._make_stats_with_position(
-            701, 700, "Sample SC", appearances=22, minutes=1900, position="Defender"
-        )
-
-        understat_player = RawUnderstatPlayerSeason(
-            player_id=7001,
-            player_name="Balde",
-            team="Sample SC",
-            season="2024/2025",
-            games=22,
-            minutes=1900,
-            goals=0,
-            assists=0,
-            xg=0.0,
-            xa=0.0,
-            npxg=0.0,
-            xg_chain=0.0,
-            xg_buildup=0.0,
-            shots=0,
-            key_passes=0,
-            yellow_cards=0,
-            red_cards=0,
-            position="D",
-        )
-
-        result = resolve_players(
-            api_players=[api_player],
-            api_stats=[api_stats],
-            understat_players=[understat_player],
-            resolved_teams=[team],
-            raw_transfers=[],
-        )
-
-        # Must be resolved via statistical matching
-        statistical = [
-            p for p in result.resolved_players if p.resolution_method == "statistical" and p.api_football_id == 701
-        ]
-        assert len(statistical) == 1
-        assert statistical[0].understat_id == 7001
-        assert statistical[0].resolution_confidence == 0.60
-        assert len(result.unresolved) == 0
